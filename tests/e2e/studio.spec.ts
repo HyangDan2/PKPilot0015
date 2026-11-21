@@ -185,7 +185,7 @@ test.describe('drawers', () => {
     await openStudio(page);
     await page.getByTestId('dock-layers').click();
     /* the stack reads front to back, so the row is found by its name */
-    await page.locator('.layer-row', { hasText: '슬롯 02' }).first().click();
+    await page.locator('.layer-row', { hasText: '슬롯 2' }).first().click();
     await expect(page.getByTestId('drawer-left')).toHaveAttribute('data-open', 'false');
     await expect(page.getByTestId('drawer-right')).toHaveAttribute('data-open', 'true');
     await expect(page.getByTestId('drawer-right')).toContainText('슬롯 02');

@@ -6,6 +6,7 @@ import {
   clamp, handlePoints, hitHandle, resizeBox, snapAngle, snapMove,
   type Box, type Corner, type Handle, type Point,
 } from '../editor/geometry';
+import { moveLayer, pinchLayer, resizeLayer } from '../editor/drag';
 
 export interface StageCanvasProps {
   spec: ShutterFrameSpec;
@@ -294,23 +295,11 @@ export function StageCanvas(props: StageCanvasProps) {
 
   const begin = (mode: DragMode, target: Exclude<Selection, null>, box: LayerBounds, pt: Point, corner?: Corner) => {
     drag.current = {
-      mode, target, base: spec, next: sf().clone(spec), box, start: pt, corner, moved: false,
+      /* `base` is an independent deep copy: every frame of the gesture is
+         measured from here, never from the value the last frame left behind. */
+      mode, target, base: sf().clone(spec), next: sf().clone(spec), box, start: pt, corner, moved: false,
       startAngle: Math.atan2(pt.y - box.cy, pt.x - box.cx) * 180 / Math.PI,
     };
-  };
-
-  const mutateRect = (target: Exclude<Selection, null>, rect: { x: number; y: number; w: number; h: number }, next: ShutterFrameSpec) => {
-    if (target.kind === 'cell') {
-      const cell = next.cells[target.index];
-      if (!cell) return;
-      cell.x = Math.round(rect.x); cell.y = Math.round(rect.y);
-      cell.w = Math.max(16, Math.round(rect.w)); cell.h = Math.max(16, Math.round(rect.h));
-    } else if (target.kind === 'sticker') {
-      const st = (next.stickers ?? []).find((item) => item.id === target.id);
-      if (!st) return;
-      st.x = Math.round(rect.x); st.y = Math.round(rect.y);
-      st.w = Math.max(8, Math.round(rect.w)); st.h = Math.max(8, Math.round(rect.h));
-    }
   };
 
   const setRotation = (target: Exclude<Selection, null>, next: ShutterFrameSpec, deg: number) => {
@@ -325,22 +314,6 @@ export function StageCanvas(props: StageCanvasProps) {
       if (st) st.rotation = Math.round(deg * 10) / 10;
     } else if (target.kind === 'emblem') {
       next.emblem.rotation = Math.round(deg * 10) / 10;
-    }
-  };
-
-  const moveRef = (target: Exclude<Selection, null>, next: ShutterFrameSpec, dx: number, dy: number) => {
-    if (target.kind === 'cell') {
-      const cell = next.cells[target.index];
-      if (cell) { cell.x = Math.round(cell.x + dx); cell.y = Math.round(cell.y + dy); }
-    } else if (target.kind === 'text') {
-      const item = next.texts.find((row) => row.id === target.id);
-      if (item) { item.x = Math.round(item.x + dx); item.y = Math.round(item.y + dy); }
-    } else if (target.kind === 'sticker') {
-      const st = (next.stickers ?? []).find((row) => row.id === target.id);
-      if (st) { st.x = Math.round(st.x + dx); st.y = Math.round(st.y + dy); }
-    } else if (target.kind === 'emblem') {
-      next.emblem.x = Math.round(next.emblem.x + dx);
-      next.emblem.y = Math.round(next.emblem.y + dy);
     }
   };
 
@@ -359,7 +332,7 @@ export function StageCanvas(props: StageCanvasProps) {
         const box = boundsOf(spec, target);
         if (box) {
           drag.current = {
-            mode: 'pinch', target, base: spec, next: sf().clone(spec), box, start: pt,
+            mode: 'pinch', target, base: sf().clone(spec), next: sf().clone(spec), box, start: pt,
             pinch: pinchOf(box), moved: false,
           };
           event.preventDefault();
@@ -419,20 +392,7 @@ export function StageCanvas(props: StageCanvasProps) {
       };
       const rect = { x: center.x - w / 2, y: center.y - h / 2, w, h };
       const next = state.next;
-      if (state.target.kind === 'cell' || state.target.kind === 'sticker') {
-        mutateRect(state.target, rect, next);
-      } else if (state.target.kind === 'text') {
-        const item = next.texts.find((row) => row.id === (state.target as { id: string }).id);
-        if (item) {
-          item.size = clamp(item.size * ratio, 6, 400);
-          item.y = Math.round(rect.y + item.size * 0.82);
-        }
-      } else if (state.target.kind === 'emblem') {
-        next.emblem.maxW = clamp(next.emblem.maxW * ratio, 8, 4000);
-        next.emblem.maxH = clamp(next.emblem.maxH * ratio, 8, 4000);
-        next.emblem.x = Math.round(center.x);
-        next.emblem.y = Math.round(center.y);
-      }
+      pinchLayer(state.target, state.base, next, ratio, rect);
       const delta = (angle - state.pinch.angle) * 180 / Math.PI;
       setRotation(state.target, next, state.pinch.rotation + delta);
       state.moved = true;
@@ -449,33 +409,14 @@ export function StageCanvas(props: StageCanvasProps) {
       const moved = { ...state.box, x: state.box.x + dx, y: state.box.y + dy };
       const snap = snapMove(moved, othersOf(state.base, target), { w: designW, h: designH }, scale);
       setGuides(snap.guides);
-      moveRef(target, state.next, dx + snap.dx, dy + snap.dy);
+      moveLayer(target, state.base, state.next, dx + snap.dx, dy + snap.dy);
       props.onSpecChange({ ...state.next });
       return;
     }
 
     if (state.mode === 'resize' && state.corner) {
       const rect = resizeBox(state.box.box, state.box.rotation, state.corner, pt);
-      if (target.kind === 'cell' || target.kind === 'sticker') {
-        mutateRect(target, rect, state.next);
-      } else if (target.kind === 'text') {
-        const item = state.next.texts.find((row) => row.id === (target as { id: string }).id);
-        if (item) {
-          const content = sf().applyVars(item.text, vars);
-          const ratio = rect.h / Math.max(1, state.box.box.h);
-          item.size = clamp(item.size * ratio, 6, 400);
-          const width = measure(item, content);
-          item.y = Math.round(rect.y + item.size * 0.82);
-          item.x = Math.round(item.align === 'left' ? rect.x : item.align === 'right' ? rect.x + width : rect.x + width / 2);
-        }
-      } else if (target.kind === 'emblem') {
-        const ratioW = rect.w / Math.max(1, state.box.box.w);
-        const ratioH = rect.h / Math.max(1, state.box.box.h);
-        state.next.emblem.maxW = clamp(state.next.emblem.maxW * ratioW, 8, 4000);
-        state.next.emblem.maxH = clamp(state.next.emblem.maxH * ratioH, 8, 4000);
-        state.next.emblem.x = Math.round(rect.x + rect.w / 2);
-        state.next.emblem.y = Math.round(rect.y + rect.h / 2);
-      }
+      resizeLayer(target, state.base, state.next, rect, state.box.box, (item) => measure(item, sf().applyVars(item.text, vars)));
       props.onSpecChange({ ...state.next });
       return;
     }
