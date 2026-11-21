@@ -229,9 +229,17 @@ export default function App() {
     /* A preset fills the frame being edited — it does not fork a new library
        entry on every click. */
     const next = { ...preset.build(), id: spec.id, updatedAt: new Date().toISOString() };
+    /* The photograph behind the plate belongs to the frame, not to the layout:
+       changing the layout keeps it, already decoded, so it never blinks. */
+    if (spec.canvas.backgroundImage) {
+      next.canvas.backgroundImage = { ...spec.canvas.backgroundImage };
+    }
     await sf().primeAssets(next);
     setSpec(next);
     setSelection(null);
+    /* the new layout is part of the frame now, so it is saved like any edit */
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => { void persist(next); }, 550);
     say(t('toast.presetApplied', { name: lang === 'en' ? preset.labelEn : preset.label }));
     setLeftOpen(false);
   };

@@ -469,22 +469,38 @@
     (Array.isArray(input.stickers) ? input.stickers : []).forEach(function (raw) {
       if (raw && raw.__image && raw.id != null) seen[String(raw.id)] = raw;
     });
-    if (input.overlay && input.overlay.__image && spec.overlay && spec.overlay.dataUrl === str(input.overlay.dataUrl, '')) {
+    if (input.overlay && canDraw(input.overlay.__image) && spec.overlay && spec.overlay.dataUrl === str(input.overlay.dataUrl, '')) {
       spec.overlay.__image = input.overlay.__image;
     }
     var inBg = cv.backgroundImage;
-    if (inBg && inBg.__image && spec.canvas.backgroundImage && spec.canvas.backgroundImage.dataUrl === str(inBg.dataUrl, '')) {
+    if (inBg && canDraw(inBg.__image) && spec.canvas.backgroundImage && spec.canvas.backgroundImage.dataUrl === str(inBg.dataUrl, '')) {
       spec.canvas.backgroundImage.__image = inBg.__image;
     }
     spec.stickers.forEach(function (st) {
       var raw = seen[st.id];
-      if (raw && raw.__image && raw.dataUrl === st.dataUrl) st.__image = raw.__image;
+      if (raw && canDraw(raw.__image) && raw.dataUrl === st.dataUrl) st.__image = raw.__image;
     });
   }
 
-  /* A mutable deep copy, so an editor never paints through to its source. */
-  function clone(spec) {
-    return JSON.parse(JSON.stringify(spec));
+  /*
+   * A mutable deep copy, so an editor never paints through to its source.
+   *
+   * Loaded images (`__image`) are the one thing that must NOT be copied: they
+   * are read-only once decoded, so the copy keeps the same reference. A JSON
+   * round-trip used to turn an `Image` into `{}` — a truthy object that threw
+   * on every later `drawImage`, which blanked the whole plate the moment the
+   * frame was touched.
+   */
+  function clone(value) {
+    if (Array.isArray(value)) return value.map(clone);
+    if (!value || typeof value !== 'object') return value;
+    var copy = {};
+    Object.keys(value).forEach(function (key) {
+      var item = value[key];
+      if (key.indexOf('__') === 0 || !item || typeof item !== 'object') copy[key] = item;
+      else copy[key] = clone(item);
+    });
+    return copy;
   }
 
   function touch(spec, patch) {
@@ -634,7 +650,29 @@
     ctx.closePath();
   }
 
+  /**
+   * A decoded image, and never the empty husk a JSON copy leaves behind: an
+   * `Image` serialised to `{}` is truthy but cannot be drawn, so every painter
+   * asks this first and one broken asset never blanks the plate.
+   */
+  function canDraw(img) {
+    if (!img) return false;
+    var w = img.naturalWidth || img.width || 0;
+    var h = img.naturalHeight || img.height || 0;
+    return w > 0 && h > 0;
+  }
+
+  /** Runs one element's paint; a failing element keeps the others on the plate. */
+  function guard(draw) {
+    try {
+      draw();
+    } catch (error) {
+      /* one element a canvas refuses cannot take the whole plate with it */
+    }
+  }
+
   function drawCover(ctx, img, w, h, x, y, cw, ch) {
+    if (!canDraw(img)) return;
     var iw = img.width || img.naturalWidth || 1;
     var ih = img.height || img.naturalHeight || 1;
     var k = Math.max(cw / iw, ch / ih);
@@ -644,6 +682,7 @@
   }
 
   function drawContain(ctx, img, x, y, cw, ch) {
+    if (!canDraw(img)) return;
     var iw = img.width || img.naturalWidth || 1;
     var ih = img.height || img.naturalHeight || 1;
     var k = Math.min(cw / iw, ch / ih);
@@ -686,7 +725,7 @@
     var bg = spec.canvas && spec.canvas.backgroundImage;
     if (!bg) return false;
     var img = bg.__image;
-    if (!img) return false;
+    if (!canDraw(img)) return false;
     ctx.save();
     ctx.globalAlpha = clamp(num(bg.opacity, 1), 0, 1);
     drawCover(ctx, img, W, H, 0, 0, W, H);
@@ -704,7 +743,7 @@
     var ov = spec.overlay;
     if (!ov || ov.layer !== layer) return;
     var img = ov.__image;
-    if (!img) return;
+    if (!canDraw(img)) return;
     ctx.save();
     ctx.globalAlpha = clamp(num(ov.opacity, 1), 0, 1);
     var iw = img.width || img.naturalWidth || 1;
@@ -822,7 +861,7 @@
     turnAt(ctx, x + w / 2, y + h / 2, sticker.rotation);
     if (sticker.kind === 'sprite') {
       var img = sticker.__image;
-      if (img) drawContain(ctx, img, x, y, w, h);
+      if (canDraw(img)) drawContain(ctx, img, x, y, w, h);
     } else {
       drawStickerPreset(ctx, sticker.preset, { x: x, y: y, w: w, h: h }, { color: sticker.color, color2: sticker.color2 });
     }
@@ -1096,15 +1135,15 @@
   function primeAssets(spec) {
     if (!spec) return Promise.resolve(spec);
     var jobs = [];
-    if (spec.overlay && !spec.overlay.__image) {
+    if (spec.overlay && !canDraw(spec.overlay.__image)) {
       jobs.push(loadImage(spec.overlay.dataUrl).then(function (img) { if (img) spec.overlay.__image = img; return !!img; }));
     }
     var bg = spec.canvas && spec.canvas.backgroundImage;
-    if (bg && !bg.__image) {
+    if (bg && !canDraw(bg.__image)) {
       jobs.push(loadImage(bg.dataUrl).then(function (img) { if (img) bg.__image = img; return !!img; }));
     }
     (spec.stickers || []).forEach(function (st) {
-      if (st.kind !== 'sprite' || st.__image || !st.dataUrl) return;
+      if (st.kind !== 'sprite' || canDraw(st.__image) || !st.dataUrl) return;
       jobs.push(loadImage(st.dataUrl).then(function (img) { if (img) st.__image = img; return !!img; }));
     });
     if (!jobs.length) return Promise.resolve(spec);
@@ -1120,11 +1159,11 @@
   /** paint() has no room to await, so a missing image is loaded and announced. */
   function ensureAssets(spec) {
     var missing = false;
-    if (spec.overlay && !spec.overlay.__image) missing = true;
+    if (spec.overlay && !canDraw(spec.overlay.__image)) missing = true;
     var bg = spec.canvas && spec.canvas.backgroundImage;
-    if (bg && !bg.__image) missing = true;
+    if (bg && !canDraw(bg.__image)) missing = true;
     (spec.stickers || []).some(function (st) {
-      if (st.kind === 'sprite' && !st.__image) { missing = true; return true; }
+      if (st.kind === 'sprite' && !canDraw(st.__image)) { missing = true; return true; }
       return false;
     });
     if (!missing) return false;
@@ -1152,15 +1191,16 @@
     ctx.rect(0, 0, W, H);
     ctx.clip();
     fillBackground(ctx, spec, W, H);
-    drawBackgroundImage(ctx, spec, W, H);
-    drawOverlay(ctx, spec, W, H, 'below');
+    /* one unreadable asset must never cost the rest of the plate */
+    guard(function () { drawBackgroundImage(ctx, spec, W, H); });
+    guard(function () { drawOverlay(ctx, spec, W, H, 'below'); });
     drawPerforation(ctx, spec, W, H, s);
     paintOrder(spec).forEach(function (item) {
       if (item.kind === 'cell') {
         var cell = spec.cells[item.index];
         var slot = slots[item.index];
         var img = slot && (slot.img || slot.image);
-        if (!cell || !img) return;
+        if (!cell || !canDraw(img)) return;
         var cw = cell.w * s;
         var ch = cell.h * s;
         ctx.save();
@@ -1170,9 +1210,9 @@
         drawCover(ctx, img, img.width, img.height, cell.x * s, cell.y * s, cw, ch);
         ctx.restore();
       } else if (item.kind === 'overlay') {
-        drawOverlay(ctx, spec, W, H, 'above');
+        guard(function () { drawOverlay(ctx, spec, W, H, 'above'); });
       } else if (item.kind === 'sticker') {
-        drawSticker(ctx, findSticker(spec, item.id), s);
+        guard(function () { drawSticker(ctx, findSticker(spec, item.id), s); });
       } else if (item.kind === 'emblem') {
         drawEmblem(ctx, spec, s);
       } else if (item.kind === 'text') {
@@ -1350,8 +1390,12 @@
     },
     put: function (spec) {
       var clean = validate(spec).spec || spec;
+      /* Decoded images cannot cross into IndexedDB (a structured clone of an
+         `Image` throws), so the row is written in its serialized form and the
+         photographs are primed again when the frame is opened. */
+      var row = JSON.parse(serialize(clean));
       return tx('readwrite', function (s) {
-        s.put({ id: clean.id, name: clean.name, updatedAt: clean.updatedAt, spec: clean });
+        s.put({ id: row.id, name: row.name, updatedAt: row.updatedAt, spec: row });
         return clean;
       });
     },
