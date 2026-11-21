@@ -10,7 +10,8 @@
     "preview": "vite preview --port 4173 --strictPort",
     "test": "vitest run",
     "test:watch": "vitest",
-    "brand": "python3 tools/generate_brand_assets.py"
+    "brand": "python3 tools/generate_brand_assets.py",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "lz-string": "1.5.0",
@@ -18,6 +19,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
