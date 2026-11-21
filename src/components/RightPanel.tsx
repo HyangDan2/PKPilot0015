@@ -93,10 +93,24 @@ function PropertiesBody(props: RightDrawerProps) {
     next.cells = next.cells.map((cell) => ({
       ...cell,
       x: Math.round(cell.x * kx), y: Math.round(cell.y * ky),
-      w: Math.round(cell.w * kx), h: Math.round(cell.h * ky),
+      w: Math.max(16, Math.round(cell.w * kx)), h: Math.max(16, Math.round(cell.h * ky)),
     }));
     next.texts = next.texts.map((item) => ({ ...item, x: Math.round(item.x * kx), y: Math.round(item.y * ky), size: Math.round(item.size * Math.min(kx, ky)) }));
     next.emblem = { ...next.emblem, x: Math.round(next.emblem.x * kx), y: Math.round(next.emblem.y * ky) };
+    /* sprites are placements on the plate like cells: they grow with it, so a
+       stretched frame never strands a sticker at its old size */
+    next.stickers = (next.stickers ?? []).map((sticker) => ({
+      ...sticker,
+      x: Math.round(sticker.x * kx), y: Math.round(sticker.y * ky),
+      w: Math.max(4, Math.round(sticker.w * kx)), h: Math.max(4, Math.round(sticker.h * ky)),
+    }));
+    /* the film holes are printed in plate pixels too */
+    next.perforation = {
+      ...next.perforation,
+      holeWidth: Math.max(2, Math.round(next.perforation.holeWidth * kx)),
+      holeHeight: Math.max(2, Math.round(next.perforation.holeHeight * kx)),
+      gap: Math.max(1, Math.round(next.perforation.gap * kx)),
+    };
     props.onChange(sf().touch(next, {}));
   };
 

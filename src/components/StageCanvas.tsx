@@ -54,6 +54,10 @@ export function StageCanvas(props: StageCanvasProps) {
   const drag = useRef<DragState | null>(null);
   const pointers = useRef<Map<number, Point>>(new Map());
   const [size, setSize] = useState({ w: 720, h: 640 });
+  /* The box as the plate was last drawn in it — the reading a finger's maths
+     should use, so a hit test can never be measured against a stale stage. */
+  const liveBox = useRef({ w: 0, h: 0 });
+  const lastScale = useRef<number | null>(null);
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
   const [angleBadge, setAngleBadge] = useState<string | null>(null);
 
@@ -72,7 +76,9 @@ export function StageCanvas(props: StageCanvasProps) {
 
   const designW = spec.canvas.width;
   const designH = spec.canvas.height;
-  const fit = Math.min((size.w - 40) / designW, (size.h - 40) / designH);
+  const boxW = Math.max(120, Math.round(liveBox.current.w || size.w));
+  const boxH = Math.max(160, Math.round(liveBox.current.h || size.h));
+  const fit = Math.min((boxW - 40) / designW, (boxH - 40) / designH);
   const scale = props.zoom === 'fit' ? Math.max(0.05, fit) : props.zoom;
   const vars = useMemo(() => sf().buildVars(spec, props.fields), [spec, props.fields]);
 
@@ -119,18 +125,29 @@ export function StageCanvas(props: StageCanvasProps) {
     const el = canvas.current;
     if (!el) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-    const cw = size.w;
-    const ch = size.h;
+    /* the element's own box, not the last ResizeObserver reading: a box that
+       changed without the observer catching up used to leave stale bands and
+       a plate drawn at the wrong fit */
+    const cw = Math.max(1, Math.round(el.clientWidth || size.w));
+    const ch = Math.max(1, Math.round(el.clientHeight || size.h));
     if (el.width !== Math.round(cw * dpr) || el.height !== Math.round(ch * dpr)) {
       el.width = Math.round(cw * dpr);
       el.height = Math.round(ch * dpr);
     }
+    liveBox.current = { w: cw, h: ch };
+    if (Math.abs(cw - size.w) > 1 || Math.abs(ch - size.h) > 1) setSize({ w: cw, h: ch });
     const ctx = el.getContext('2d');
     if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, el.width, el.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cw, ch);
 
-    const s = scale;
+    const fitLive = Math.min((cw - 40) / designW, (ch - 40) / designH);
+    const s = props.zoom === 'fit' ? Math.max(0.05, fitLive) : props.zoom;
+    if (typeof scaleRef.current === 'function' && Math.abs((lastScale.current ?? -1) - s) > 0.0005) {
+      lastScale.current = s;
+      scaleRef.current(s);
+    }
     const ox = (cw - designW * s) / 2;
     const oy = (ch - designH * s) / 2;
 
@@ -194,7 +211,7 @@ export function StageCanvas(props: StageCanvasProps) {
     if (selection && selection.kind !== 'overlay') {
       const b = boundsOf(spec, selection);
       if (b) {
-        const pts = handlePoints(b, scale);
+        const pts = handlePoints(b, s);
         ctx.save();
         ctx.lineWidth = 1.8 / s;
         ctx.strokeStyle = '#a78bfa';
