@@ -553,6 +553,14 @@ kbd {
   .dock-save { bottom: 16px; }
   .esc-only { display: none; }
 
+  /* the sheet overlays the plate: it never squeezes or pushes the dock away */
+  .workspace.left-open .stage, .workspace.right-open .stage { margin: 0; }
+  .workspace.left-open .dock-left { left: var(--float); }
+  .workspace.right-open .dock-right,
+  .workspace.right-open .dock-save { right: var(--float); }
+  .workspace.left-open .dock-zoom,
+  .workspace.right-open .dock-zoom { left: 50%; }
+
   .fab { height: 40px; width: 40px; padding: 0; justify-content: center; border-radius: 50%; }
   .fab .fab-label { display: none; }
   .fab-dot { top: 0; right: 0; }

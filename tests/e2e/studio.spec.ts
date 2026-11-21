@@ -140,6 +140,12 @@ test.describe('drawers', () => {
         return Math.abs(rect!.y + rect!.height - viewport.height);
       }).toBeLessThan(2);
       await expect(page.locator('.sheet-backdrop')).toBeVisible();
+      /* the sheet overlays the plate: the dock and the canvas keep their place */
+      const zoom = await page.locator('.zoom-capsule').boundingBox();
+      expect(zoom!.x).toBeGreaterThanOrEqual(0);
+      expect(zoom!.x + zoom!.width).toBeLessThanOrEqual(viewport.width);
+      const canvas = await page.locator('canvas.stage-canvas').boundingBox();
+      expect(canvas!.width).toBeGreaterThan(100);
     }
 
     await page.getByRole('tab', { name: /레이어/ }).click();
