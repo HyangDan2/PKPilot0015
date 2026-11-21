@@ -189,6 +189,50 @@ test.describe('background crop modal', () => {
     expect(Math.abs(dims.w / dims.h - RATIO)).toBeLessThan(0.02);
   });
 
+  test('a finger drags the window on a phone', async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 1440) >= 1024, 'touch only');
+    await openCrop(page);
+    await loadPhoto(page);
+    const grip = await box(page, 'crop-handle-se');
+    await drag(page, { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, -60, -60);
+
+    const start = await box(page);
+    const cdp = await page.context().newCDPSession(page);
+    const x = start.x + start.width / 2;
+    const y = start.y + start.height / 2;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+    for (let i = 1; i <= 10; i += 1) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i * 3, y, id: 1 }] });
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+
+    const moved = await box(page);
+    /* ten touch frames of 3px each move the window 30px, exactly */
+    expect(Math.abs(moved.x - start.x - 30)).toBeLessThan(2);
+    expect(Math.abs(moved.y - start.y)).toBeLessThan(2);
+    expect(Math.abs(moved.width - start.width)).toBeLessThan(1);
+  });
+
+  test('reopening shows the photograph already in the frame', async ({ page }) => {
+    await openCrop(page);
+    await loadPhoto(page);
+    await page.getByTestId('bg-apply').click();
+    await page.getByTestId('bg-crop-modal').waitFor({ state: 'detached' });
+
+    await page.getByTestId('dock-props').click();
+    const reCut = page.getByTestId('props-bg-cut');
+    await reCut.scrollIntoViewIfNeeded();
+    await reCut.click();
+    await expect(page.getByTestId('bg-crop-modal')).toBeVisible();
+    await expect(page.getByTestId('crop-box')).toBeVisible();
+
+    const stage = await box(page, 'crop-stage');
+    const frame = await box(page);
+    expect(stage.width).toBeGreaterThan(0);
+    expect(Math.abs(frame.width / frame.height - RATIO)).toBeLessThan(0.02);
+    await expect(page.locator('.crop-name')).toContainText('현재 배경');
+  });
+
   test('both languages name the three fits', async ({ page }) => {
     await openCrop(page);
     await loadPhoto(page);
