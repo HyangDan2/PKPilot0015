@@ -714,7 +714,7 @@ kbd {
   border-top: 1px solid var(--line-2); flex: none;
 }
 .crop-modal .modal-body {
-  flex: 1 1 auto; min-height: 0; overflow: hidden;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column; gap: 10px;
   padding: 12px 18px 14px;
 }
@@ -726,7 +726,7 @@ kbd {
   background:
     repeating-conic-gradient(rgba(255, 255, 255, 0.02) 0 25%, transparent 0 50%) 0 0 / 16px 16px,
     var(--bg-2);
-  border-radius: 12px; border: 1px solid var(--line-2); overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--line-2); overflow: visible;
 }
 .crop-host > .drop-zone { flex: 1 1 auto; margin: 12px; justify-content: center; }
 .crop-stage { position: relative; flex: none; }
@@ -782,4 +782,10 @@ kbd {
   .workspace.sticker-open .dock-save { right: var(--float); }
   .crop-host { min-height: 46dvh; }
   .modal.crop-modal { width: min(96vw, 760px); height: 92dvh; max-height: 92dvh; }
+}
+
+/* a short phone screen: the photo panel gives up a few vh so the controls and
+   note stay in the sheet without scrolling */
+@media (max-height: 700px) {
+  .crop-host { min-height: 38dvh; }
 }
