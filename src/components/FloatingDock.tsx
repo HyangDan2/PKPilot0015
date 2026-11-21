@@ -36,7 +36,6 @@ const RESET_ARM_MS = 3600;
 export function FloatingDock(props: FloatingDockProps) {
   const { t } = useI18n();
   const [saveOpen, setSaveOpen] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
   const [resetArmed, setResetArmed] = useState(false);
   const armTimer = useRef(0);
 
@@ -112,37 +111,25 @@ export function FloatingDock(props: FloatingDockProps) {
         </button>
       </div>
 
-      <div className={`dock dock-add${addOpen ? ' expanded' : ''}`} role="toolbar" aria-label={t('dock.add')}>
+      <div className="dock dock-add" role="toolbar" aria-label={t('dock.add')}>
         <div className="dock-add-items">
-          <button type="button" className="fab" id="add-sticker" data-testid="add-sticker" title={t('dock.addSticker')} onClick={() => { setAddOpen(false); props.onAddSticker(); }}>
+          <button type="button" className="fab" id="add-sticker" data-testid="add-sticker" title={t('dock.addSticker')} onClick={props.onAddSticker}>
             <Icon name="sticker" size={16} />
             <span className="fab-label">{t('dock.addSticker')}</span>
           </button>
-          <button type="button" className="fab" id="add-sprite" data-testid="add-sprite" title={t('dock.addSprite')} onClick={() => { setAddOpen(false); props.onAddSprite(); }}>
+          <button type="button" className="fab" id="add-sprite" data-testid="add-sprite" title={t('dock.addSprite')} onClick={props.onAddSprite}>
             <Icon name="sprite" size={16} />
             <span className="fab-label">{t('dock.addSprite')}</span>
           </button>
-          <button type="button" className="fab" id="add-background" data-testid="add-background" title={t('dock.addBackground')} onClick={() => { setAddOpen(false); props.onAddBackground(); }}>
+          <button type="button" className="fab" id="add-background" data-testid="add-background" title={t('dock.addBackground')} onClick={props.onAddBackground}>
             <Icon name="image" size={16} />
             <span className="fab-label">{t('dock.addBackground')}</span>
           </button>
-          <button type="button" className="fab" id="add-text" data-testid="add-text" title={t('dock.addText')} onClick={() => { setAddOpen(false); props.onAddText(); }}>
+          <button type="button" className="fab" id="add-text" data-testid="add-text" title={t('dock.addText')} onClick={props.onAddText}>
             <Icon name="plus" size={16} />
             <span className="fab-label">{t('dock.addText')}</span>
           </button>
         </div>
-        <button
-          type="button"
-          className={`fab fab-add-toggle${addOpen ? ' on' : ''}`}
-          data-testid="dock-add-toggle"
-          aria-expanded={addOpen}
-          aria-label={t('dock.add')}
-          title={t('dock.add')}
-          onClick={() => setAddOpen((value) => !value)}
-        >
-          <Icon name={addOpen ? 'close' : 'plusCircle'} size={17} />
-          <span className="fab-label">{t('dock.add')}</span>
-        </button>
       </div>
 
       <div className="dock dock-zoom">

@@ -658,7 +658,6 @@ kbd {
 /* the add door, bottom-left: four touch tools behind one toggle on a phone */
 .dock-add { bottom: 16px; left: var(--float); flex-direction: column; align-items: flex-start; }
 .dock-add-items { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
-.fab-add-toggle { display: none; }
 .workspace.left-open .dock-add { left: calc(var(--drawer-w) + 22px); }
 .workspace.sticker-open .dock-right,
 .workspace.sticker-open .dock-save { right: calc(var(--drawer-w) + 22px); }
@@ -738,12 +737,13 @@ kbd {
   .context-bar { top: 8px; max-width: calc(100% - 132px); padding: 3px 4px 3px 8px; }
   .context-name { display: none; }
   .tool { min-width: 30px; height: 30px; }
-  .dock-add-items { display: none; }
-  .dock-add.expanded .dock-add-items {
-    display: flex; position: absolute; bottom: calc(100% + 8px); left: 0;
+  /* a phone keeps the four touch tools in one row, above the zoom capsule */
+  .dock-add {
+    bottom: 62px; left: 50%; transform: translateX(-50%);
+    flex-direction: row; align-items: center;
   }
-  .fab-add-toggle { display: inline-flex; }
-  .workspace.left-open .dock-add { left: var(--float); }
+  .dock-add-items { flex-direction: row; gap: 8px; align-items: center; }
+  .workspace.left-open .dock-add { left: 50%; }
   .workspace.sticker-open .dock-right,
   .workspace.sticker-open .dock-save { right: var(--float); }
   .crop-host { min-height: 160px; padding: 10px; }

@@ -130,7 +130,11 @@ export function BackgroundCropModal(props: BackgroundCropModalProps) {
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!img) return;
-    (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
+    try {
+      (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
+    } catch {
+      /* keep dragging even if the pointer cannot be captured */
+    }
     pins.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pins.current.size === 2) {
       const [a, b] = Array.from(pins.current.values());

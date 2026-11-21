@@ -347,7 +347,11 @@ export function StageCanvas(props: StageCanvasProps) {
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const pt = toDesign(event.clientX, event.clientY);
     pointers.current.set(event.pointerId, pt);
-    (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId);
+    try {
+      (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId);
+    } catch {
+      /* a pointer the browser no longer tracks still moves with the finger */
+    }
 
     if (pointers.current.size === 2) {
       const target = selection ?? null;
