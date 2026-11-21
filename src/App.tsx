@@ -123,7 +123,9 @@ export default function App() {
     const preset = PRESETS.find((item) => item.id === id);
     if (!preset || !spec) return;
     await persist(spec);
-    const next = preset.build();
+    /* A preset fills the frame being edited — it does not fork a new library
+       entry on every click. */
+    const next = { ...preset.build(), id: spec.id, updatedAt: new Date().toISOString() };
     if (next.overlay) await sf().primeOverlay(next);
     setSpec(next);
     setSelection(null);
