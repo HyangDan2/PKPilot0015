@@ -129,7 +129,7 @@ export const PRESETS: PresetDef[] = [
       texts: [
         text({ id: 't-title', text: 'MYNDA LJÓSA', x: 340, y: 88, size: 30, weight: 700, color: '#f2ede2', letterSpacing: 8 }),
         text({ id: 't-film', text: '{{film}} · ISO {{iso}}', x: 340, y: 1716, size: 20, color: '#c9c2b5', family: 'mono', letterSpacing: 2 }),
-        text({ id: 't-exif', text: '{{camera}} · {{lens}} · {{shutter}} · f/{{aperture}}', x: 340, y: 1756, size: 17, color: '#948d81', family: 'mono' }),
+        text({ id: 't-exif', text: '{{camera}} · {{shutter}} · f/{{aperture}}', x: 340, y: 1754, size: 16, color: '#948d81', family: 'mono' }),
         text({ id: 't-num', text: 'HD2 · FRAME 04', x: 340, y: 1852, size: 16, color: '#6f695f', family: 'mono', letterSpacing: 4 }),
       ],
       emblem: { enabled: true, x: 340, y: 1812, maxW: 210, maxH: 40, align: 'center', mode: 'light' },
