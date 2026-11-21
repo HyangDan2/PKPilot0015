@@ -113,8 +113,8 @@ export function StageCanvas(props: StageCanvasProps) {
       const active = props.selection?.kind === 'cell' && props.selection.index === index;
       ctx.save();
       ctx.lineWidth = (active ? 2 : 1) / s;
-      ctx.strokeStyle = active ? '#8b5cf6' : (spec.canvas.light ? 'rgba(60,44,90,0.28)' : 'rgba(235,226,255,0.28)');
-      if (!active) ctx.setLineDash([6 / s, 5 / s]);
+      ctx.strokeStyle = active ? '#8b5cf6' : (spec.canvas.light ? 'rgba(60,44,90,0.16)' : 'rgba(235,226,255,0.16)');
+      if (!active) ctx.setLineDash([5 / s, 6 / s]);
       sf().helpers.roundRect(ctx, cell.x, cell.y, cell.w, cell.h, cell.radius);
       ctx.stroke();
       ctx.restore();
@@ -149,10 +149,13 @@ export function StageCanvas(props: StageCanvasProps) {
       const box = { x: left, y: top, w: width, h: item.size * 1.1 };
       textBoxes[item.id] = box;
       const active = props.selection?.kind === 'text' && props.selection.id === item.id;
-      ctx.lineWidth = (active ? 1.6 : 0.8) / s;
-      ctx.strokeStyle = active ? '#8b5cf6' : 'rgba(139,92,246,0.32)';
-      ctx.setLineDash(active ? [] : [4 / s, 4 / s]);
-      ctx.strokeRect(box.x - 3 / s, box.y, box.w + 6 / s, box.h);
+      /* Only the selected row wears a box: the plate itself stays clean. */
+      if (active) {
+        ctx.lineWidth = 1.6 / s;
+        ctx.strokeStyle = '#8b5cf6';
+        ctx.setLineDash([]);
+        ctx.strokeRect(box.x - 3 / s, box.y, box.w + 6 / s, box.h);
+      }
       ctx.restore();
     });
     boxes.current.texts = textBoxes;
@@ -165,12 +168,13 @@ export function StageCanvas(props: StageCanvasProps) {
       emblemBox = { x: left, y: e.y - e.maxH / 2, w: mw, h: e.maxH };
       boxes.current.emblem = emblemBox;
       const active = props.selection?.kind === 'emblem';
-      ctx.save();
-      ctx.lineWidth = (active ? 1.6 : 0.8) / s;
-      ctx.strokeStyle = active ? '#8b5cf6' : 'rgba(139,92,246,0.25)';
-      ctx.setLineDash(active ? [] : [4 / s, 4 / s]);
-      ctx.strokeRect(emblemBox.x, emblemBox.y, emblemBox.w, emblemBox.h);
-      ctx.restore();
+      if (active) {
+        ctx.save();
+        ctx.lineWidth = 1.6 / s;
+        ctx.strokeStyle = '#8b5cf6';
+        ctx.strokeRect(emblemBox.x, emblemBox.y, emblemBox.w, emblemBox.h);
+        ctx.restore();
+      }
     } else {
       boxes.current.emblem = null;
     }
