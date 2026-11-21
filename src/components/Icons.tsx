@@ -24,6 +24,8 @@ const PATHS: Record<string, string> = {
   close: 'M18 6L6 18 M6 6l12 12',
   check: 'M20 6L9 17l-5-5',
   sliders: 'M3 7h12 M19 7h2 M3 17h6 M13 17h8 M15 4v6 M9 14v6',
+  help: 'M12 17h.01 M9.1 9a3 3 0 1 1 6 0c0 2.1-3 2.3-3 4.1',
+  chevron: 'M6 9l6 6 6-6',
 };
 
 export function Icon({ name, size = 16, style }: { name: string; size?: number; style?: CSSProperties }) {
@@ -42,17 +44,6 @@ export function Icon({ name, size = 16, style }: { name: string; size?: number; 
       style={style}
     >
       <path d={PATHS[name] ?? PATHS.spark} />
-    </svg>
-  );
-}
-
-/** The HD2Lab dual-skew emblem, drawn in the header. */
-export function BrandMark() {
-  return (
-    <svg className="brand-mark" viewBox="0 0 34 34" width="30" height="30" aria-hidden="true">
-      <rect x="1" y="1" width="32" height="32" rx="9" className="brand-mark-bg" />
-      <path d="M13 24L19 10" className="brand-mark-bar" />
-      <path d="M20 24L26 10" className="brand-mark-bar brand-mark-bar-2" />
     </svg>
   );
 }

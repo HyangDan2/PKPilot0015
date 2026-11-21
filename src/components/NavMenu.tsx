@@ -1,26 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
+import { useI18n, type TKey } from '../i18n';
 import { Icon } from './Icons';
 
-/** The three apps plus the two portals, the same list in every ⋮ menu. */
-export const HD2_LINKS = [
-  { id: 'web-hq', label: 'HD2Lab Web-HQ', note: '포털 홈', href: 'https://hyangdan2.github.io/' },
-  { id: 'apphub', label: 'ApplicationHub', note: '앱 허브', href: 'https://hyangdan2.github.io/ApplicationHub/' },
-  { id: 'shutterplate', label: 'Shutterplate', note: 'EXIF & 4컷 인화 스튜디오', href: 'https://hyangdan2.github.io/PKPilot0003/' },
-  { id: 'nordlys', label: 'Nordlys', note: '필름 색보정 & 영상 스튜디오', href: 'https://hyangdan2.github.io/PKPilot0011/' },
-  { id: 'mynda', label: 'Mynda Ljósa', note: '커스텀 4컷 프레임 에디터', href: 'https://hyangdan2.github.io/PKPilot0015/' },
+/** The four HD2Lab doors, the same list in every ⋮ menu. */
+export const HD2_LINKS: { id: string; label: TKey; note: TKey; href: string }[] = [
+  { id: 'web-hq', label: 'menu.webHq', note: 'menu.webHqNote', href: 'https://hyangdan2.github.io/' },
+  { id: 'apphub', label: 'menu.apphub', note: 'menu.apphubNote', href: 'https://hyangdan2.github.io/ApplicationHub/' },
+  { id: 'shutterplate', label: 'menu.shutterplate', note: 'menu.shutterplateNote', href: 'https://hyangdan2.github.io/PKPilot0003/' },
+  { id: 'nordlys', label: 'menu.nordlys', note: 'menu.nordlysNote', href: 'https://hyangdan2.github.io/PKPilot0011/' },
+  { id: 'mynda', label: 'menu.mynda', note: 'menu.myndaNote', href: 'https://hyangdan2.github.io/PKPilot0015/' },
 ];
 
 export interface NavMenuProps {
   /** The app the visitor is in; its own row is not repeated. */
-  self: 'mynda' | 'shutterplate' | 'nordlys';
-  onReset?: () => void;
+  self: 'mynda';
+  onHelp: () => void;
+  onImportJson: () => void;
+  onReset: () => void;
 }
 
 /**
- * The ⋮ menu: one navigation section shared by all three apps, plus the
- * app-local action at the bottom.
+ * The ⋮ menu: one navigation section shared by every HD2Lab app, then the
+ * studio's own actions — help, importing a file, and the library reset.
  */
-export function NavMenu({ self, onReset }: NavMenuProps) {
+export function NavMenu({ self, onHelp, onImportJson, onReset }: NavMenuProps) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement | null>(null);
 
@@ -39,22 +43,25 @@ export function NavMenu({ self, onReset }: NavMenuProps) {
   }, [open]);
 
   const links = HD2_LINKS.filter((item) => item.id !== self);
+  const run = (action: () => void) => () => { setOpen(false); action(); };
+
   return (
     <div className="nav-menu" ref={box}>
       <button
         type="button"
         className="icon-btn"
+        data-testid="more-menu"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="더 보기 메뉴"
-        title="더 보기"
+        aria-label={t('header.more')}
+        title={t('header.more')}
         onClick={() => setOpen((value) => !value)}
       >
         <Icon name="menu" size={18} />
       </button>
       {open && (
         <div className="nav-pop" role="menu">
-          <p className="nav-kicker">NAVIGATION</p>
+          <p className="nav-kicker">{t('menu.navigation')}</p>
           {links.map((item) => (
             <a
               key={item.id}
@@ -65,25 +72,28 @@ export function NavMenu({ self, onReset }: NavMenuProps) {
               className="nav-row"
               onClick={() => setOpen(false)}
             >
-              <span className="nav-name">{item.label}</span>
-              <span className="nav-note">{item.note}</span>
+              <span className="nav-name">{t(item.label)}</span>
+              <span className="nav-note">{t(item.note)}</span>
               <Icon name="external" size={13} />
             </a>
           ))}
-          {onReset && (
-            <>
-              <p className="nav-kicker">THIS STUDIO</p>
-              <button
-                type="button"
-                role="menuitem"
-                className="nav-row nav-row-btn"
-                onClick={() => { setOpen(false); onReset(); }}
-              >
-                <span className="nav-name">내 프레임 초기화</span>
-                <span className="nav-note">기본 프리셋으로 되돌립니다</span>
-              </button>
-            </>
-          )}
+
+          <p className="nav-kicker">{t('menu.studio')}</p>
+          <button type="button" role="menuitem" className="nav-row" onClick={run(onHelp)}>
+            <span className="nav-name">{t('menu.help')}</span>
+            <span className="nav-note">{t('menu.helpNote')}</span>
+            <Icon name="help" size={13} />
+          </button>
+          <button type="button" role="menuitem" className="nav-row" onClick={run(onImportJson)}>
+            <span className="nav-name">{t('menu.import')}</span>
+            <span className="nav-note">{t('menu.importNote')}</span>
+            <Icon name="upload" size={13} />
+          </button>
+          <button type="button" role="menuitem" className="nav-row nav-row-btn" onClick={run(onReset)}>
+            <span className="nav-name">{t('menu.reset')}</span>
+            <span className="nav-note">{t('menu.resetNote')}</span>
+            <Icon name="trash" size={13} />
+          </button>
         </div>
       )}
     </div>

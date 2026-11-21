@@ -1,15 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sf, loadEngine, type FrameFields, type FrameSlot, type ShutterFrameSpec } from './spec/shutterframe';
 import { Header } from './components/Header';
-import { LeftRail, type LibraryItem } from './components/LeftRail';
+import { LeftDrawer, type LeftTab, type LibraryItem } from './components/LeftDrawer';
 import { StageCanvas } from './components/StageCanvas';
-import { RightPanel } from './components/RightPanel';
-import { Icon } from './components/Icons';
+import { RightDrawer } from './components/RightPanel';
+import { FloatingDock } from './components/FloatingDock';
+import { HelpModal } from './components/HelpModal';
 import { PRESETS, DEMO_FIELDS, blankSpec } from './editor/presets';
 import { loadDemoSlots, slotFromFile } from './editor/photos';
 import type { Selection } from './editor/selection';
+import { I18nContext, translate, type Lang, type TKey, type Vars } from './i18n';
 
 const THEME_KEY = 'mynda.theme';
+const LANG_KEY = 'mynda.lang';
+const WIDE = '(min-width: 1024px)';
+
+function storedLang(): Lang {
+  return localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'ko';
+}
+
+function storedTheme(): 'iris' | 'navy' {
+  return localStorage.getItem(THEME_KEY) === 'iris' ? 'iris' : 'navy';
+}
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -18,17 +30,30 @@ export default function App() {
   const [slotNames, setSlotNames] = useState<string[]>(['Fjord Dawn', 'Pine Ridge', 'Snow Field', 'Midnight Sun']);
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
-  const [theme, setTheme] = useState<'iris' | 'navy'>(() => (localStorage.getItem(THEME_KEY) === 'navy' ? 'navy' : 'iris'));
+  const [theme, setTheme] = useState<'iris' | 'navy'>(storedTheme);
+  const [lang, setLangState] = useState<Lang>(storedLang);
   const [grid, setGrid] = useState(false);
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
+  const [scale, setScale] = useState(1);
+  const [leftOpen, setLeftOpen] = useState(false);
+  const [leftTab, setLeftTab] = useState<LeftTab>('presets');
+  const [rightOpen, setRightOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null);
-  const [tab, setTab] = useState<'frames' | 'stage' | 'props'>('stage');
   const importInput = useRef<HTMLInputElement | null>(null);
   const saveTimer = useRef<number>(0);
   const toastTimer = useRef<number>(0);
   const fields = useMemo<FrameFields>(() => ({ ...DEMO_FIELDS }), []);
+
+  const setLang = useCallback((next: Lang) => {
+    setLangState(next);
+    try { localStorage.setItem(LANG_KEY, next); } catch { /* private mode */ }
+  }, []);
+
+  const t = useCallback((key: TKey, vars?: Vars) => translate(lang, key, vars), [lang]);
+  const i18n = useMemo(() => ({ lang, t, setLang }), [lang, t, setLang]);
 
   const say = useCallback((text: string, tone: 'ok' | 'warn' = 'ok') => {
     setToast({ text, tone });
@@ -67,7 +92,7 @@ export default function App() {
       let initial: ShutterFrameSpec;
       if (incoming) {
         initial = incoming;
-        say('링크에서 프레임을 불러왔습니다.');
+        say(translate(storedLang(), 'toast.fromLink'));
       } else {
         const rows = await sf().store.list();
         initial = rows.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0] ?? PRESETS[0].build();
@@ -84,10 +109,37 @@ export default function App() {
     return () => { alive = false; };
   }, [refreshLibrary, say]);
 
+  /* A #frame= link can arrive after the studio has booted (a pasted fragment,
+     or a browser that applies the hash once the document is ready). */
+  useEffect(() => {
+    if (!ready) return;
+    const applyHash = () => {
+      let incoming: ShutterFrameSpec | null = null;
+      try {
+        incoming = sf().fromUrl(window.location.href);
+      } catch {
+        incoming = null;
+      }
+      if (!incoming) return;
+      setSpec(incoming);
+      setSelection(null);
+      say(t('toast.fromLink'));
+      if (window.location.hash.indexOf('frame=') >= 0) {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    };
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  }, [ready, say, t]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem(THEME_KEY, theme);
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* private mode */ }
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   /* ── autosave ───────────────────────────────────────────────────────────── */
   const persist = useCallback(async (next: ShutterFrameSpec, quiet = true) => {
@@ -96,13 +148,13 @@ export default function App() {
       await sf().store.put(next);
       await refreshLibrary();
       setDirty(false);
-      if (!quiet) say('저장했습니다 · 내 보관함');
+      if (!quiet) say(translate(lang, 'toast.savedShelf'));
     } catch {
-      if (!quiet) say('저장하지 못했습니다.', 'warn');
+      if (!quiet) say(translate(lang, 'toast.saveFailed'), 'warn');
     } finally {
       setSaving(false);
     }
-  }, [refreshLibrary, say]);
+  }, [refreshLibrary, say, lang]);
 
   const commit = useCallback((next: ShutterFrameSpec) => {
     setSpec(next);
@@ -118,6 +170,28 @@ export default function App() {
     return () => window.removeEventListener('pagehide', onLeave);
   }, [spec, ready]);
 
+  /* ── drawers ────────────────────────────────────────────────────────────── */
+  const closeDrawers = useCallback(() => {
+    setLeftOpen(false);
+    setRightOpen(false);
+  }, []);
+
+  const openLeft = useCallback((tab: LeftTab) => {
+    setLeftOpen((open) => (open && leftTab === tab ? false : true));
+    setLeftTab(tab);
+  }, [leftTab]);
+
+  const selectFromCanvas = useCallback((value: Selection) => {
+    setSelection(value);
+    if (value && typeof window !== 'undefined' && window.matchMedia(WIDE).matches) setRightOpen(true);
+  }, []);
+
+  const selectAndEdit = useCallback((value: Selection) => {
+    setSelection(value);
+    setLeftOpen(false);
+    setRightOpen(true);
+  }, []);
+
   /* ── actions ────────────────────────────────────────────────────────────── */
   const applyPreset = async (id: string) => {
     const preset = PRESETS.find((item) => item.id === id);
@@ -129,21 +203,21 @@ export default function App() {
     if (next.overlay) await sf().primeOverlay(next);
     setSpec(next);
     setSelection(null);
-    say(`${preset.label} 프리셋을 적용했습니다.`);
-    setTab('stage');
+    say(t('toast.presetApplied', { name: lang === 'en' ? preset.labelEn : preset.label }));
+    setLeftOpen(false);
   };
 
   const openLibrary = async (id: string) => {
     if (!spec) return;
-    if (spec.id === id) return;
+    if (spec.id === id) { setLeftOpen(false); return; }
     await persist(spec);
     const found = await sf().store.get(id);
-    if (!found) { say('프레임을 찾지 못했습니다.', 'warn'); return; }
+    if (!found) { say(t('toast.frameNotFound'), 'warn'); return; }
     if (found.overlay) await sf().primeOverlay(found);
     setSpec(found);
     setSelection(null);
-    say(`'${found.name}' 프레임을 열었습니다.`);
-    setTab('stage');
+    say(t('toast.frameOpened', { name: found.name }));
+    setLeftOpen(false);
   };
 
   const newFrame = async () => {
@@ -152,16 +226,17 @@ export default function App() {
     const next = PRESETS[0].build();
     setSpec(next);
     setSelection(null);
-    say('새 프레임을 만들었습니다.');
+    say(t('toast.created'));
+    setLeftOpen(false);
   };
 
   const duplicate = async () => {
     if (!spec) return;
-    const next = sf().touch(sf().clone(spec), { id: sf().uid('frame'), name: `${spec.name} 복사` });
+    const next = sf().touch(sf().clone(spec), { id: sf().uid('frame'), name: `${spec.name} ${lang === 'en' ? 'copy' : '복사'}` });
     next.updatedAt = new Date().toISOString();
     setSpec(next);
     await persist(next);
-    say('프레임을 복제했습니다.');
+    say(t('toast.duplicated'));
   };
 
   const deleteFrame = async (id: string) => {
@@ -174,10 +249,10 @@ export default function App() {
       if (fallback.overlay) await sf().primeOverlay(fallback);
       setSpec(fallback);
     }
-    say('보관함에서 삭제했습니다.');
+    say(t('toast.deleted'));
   };
 
-  const saveFile = () => {
+  const saveFile = useCallback(() => {
     if (!spec) return;
     const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -187,18 +262,21 @@ export default function App() {
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
     void persist(spec);
-    say('저장했습니다 · 보관함 + .shutterframe.json');
-  };
+    say(translate(lang, 'toast.savedFile'));
+  }, [spec, persist, say, lang]);
 
   const importJson = async (file: File) => {
     const text = await file.text();
     const result = sf().parse(text);
-    if (!result.spec) { say(`불러오지 못했습니다: ${result.errors[0] ?? '알 수 없는 형식'}`, 'warn'); return; }
+    if (!result.spec) {
+      say(t('toast.importFailed', { reason: result.errors[0] ?? t('toast.unknownFormat') }), 'warn');
+      return;
+    }
     if (result.spec.overlay) await sf().primeOverlay(result.spec);
     setSpec(result.spec);
     setSelection(null);
     await persist(result.spec);
-    say(`'${result.spec.name}' 프레임을 불러왔습니다.`);
+    say(t('toast.imported', { name: result.spec.name }));
   };
 
   const shareLink = (app: 'mynda' | 'shutterplate' | 'nordlys') => {
@@ -215,20 +293,23 @@ export default function App() {
     const link = shareLink('mynda');
     try {
       await navigator.clipboard.writeText(link);
-      say(link.length > 7000 ? '링크를 복사했습니다 — PNG가 커서 길이가 깁니다. 파일 저장도 함께 쓰세요.' : '링크를 복사했습니다.', link.length > 12000 ? 'warn' : 'ok');
+      say(
+        link.length > 7000 ? t('toast.linkCopiedLong') : t('toast.linkCopied'),
+        link.length > 12000 ? 'warn' : 'ok',
+      );
     } catch {
-      window.prompt('아래 링크를 복사하세요', link);
+      window.prompt(t('toast.copyPrompt'), link);
     }
   };
 
   const openIn = (app: 'shutterplate' | 'nordlys') => {
     const link = shareLink(app);
     if (link.length > 12000) {
-      say('PNG가 커서 링크가 너무 깁니다. 프레임을 파일로 저장한 뒤 그 앱에서 불러오세요.', 'warn');
+      say(t('toast.linkTooLong'), 'warn');
       return;
     }
     window.open(link, '_blank', 'noopener');
-    if (link.length > 7000) say('링크가 깁니다 — 상대 앱에서 임포트되지 않으면 파일로 저장해 불러오세요.', 'warn');
+    if (link.length > 7000) say(t('toast.linkLong'), 'warn');
   };
 
   const addSlotFile = async (index: number, file: File) => {
@@ -242,35 +323,26 @@ export default function App() {
       });
       setSlotNames((previous) => {
         const next = previous.slice();
-        while (next.length < 4) next.push('빈 칸');
+        while (next.length < 4) next.push(t('layers.slotEmpty'));
         next[index] = file.name;
         return next;
       });
-      say(`슬롯 ${index + 1}에 내 사진을 넣었습니다.`);
+      say(t('toast.slotFilled', { n: index + 1 }));
     } catch {
-      say('사진을 읽지 못했습니다.', 'warn');
+      say(t('toast.photoFailed'), 'warn');
     }
   };
 
   const addOverlay = async (file: File) => {
     if (!spec) return;
     const dataUrl = await readAsDataURL(file);
-    if (!/^data:image\//i.test(dataUrl)) { say('이미지 파일이 아닙니다.', 'warn'); return; }
+    if (!/^data:image\//i.test(dataUrl)) { say(t('toast.notImage'), 'warn'); return; }
     const next = sf().clone(spec);
     next.overlay = { dataUrl, layer: 'above', opacity: 1 };
     await sf().primeOverlay(next);
     commit(next);
-    say('오버레이를 올렸습니다.');
+    say(t('toast.overlayAdded'));
   };
-
-  if (!ready || !spec) {
-    return (
-      <div className="boot">
-        <div className="boot-mark" />
-        <p>Mynda Ljósa — 프레임 스튜디오를 여는 중…</p>
-      </div>
-    );
-  }
 
   const resetStudio = async () => {
     await sf().store.clear();
@@ -278,113 +350,172 @@ export default function App() {
     setSpec(next);
     setSelection(null);
     await refreshLibrary();
-    say('내 프레임 보관함을 초기화했습니다.');
+    say(t('toast.reset'));
   };
 
+  /* ── keyboard: Esc closes every layer, ⌘/Ctrl+S downloads the frame ─────── */
+  const saveRef = useRef(saveFile);
+  useEffect(() => { saveRef.current = saveFile; }, [saveFile]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setHelpOpen(false);
+        closeDrawers();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        saveRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [closeDrawers]);
+
+  if (!ready || !spec) {
+    return (
+      <I18nContext.Provider value={i18n}>
+        <div className="boot">
+          <span className="mark boot-mark" aria-hidden="true" />
+          <p>{t('boot.opening')}</p>
+        </div>
+      </I18nContext.Provider>
+    );
+  }
+
   return (
-    <div className="app">
-      <Header
-        spec={spec}
-        theme={theme}
-        saving={saving}
-        dirty={dirty}
-        onTheme={() => setTheme(theme === 'iris' ? 'navy' : 'iris')}
-        onPresets={() => setTab('frames')}
-        onImportJson={() => importInput.current?.click()}
-        onSave={saveFile}
-        onCopyLink={copyLink}
-        onOpenIn={openIn}
-        onReset={resetStudio}
-      />
-      <main className={`workspace tab-${tab}`}>
-        <LeftRail
+    <I18nContext.Provider value={i18n}>
+      <div className="app">
+        <Header
           spec={spec}
-          slots={slots}
-          slotNames={slotNames}
-          selection={selection}
-          library={library}
-          activeId={spec.id}
-          onSelect={(value) => { setSelection(value); setTab('props'); }}
-          onPreset={applyPreset}
-          onOpenLibrary={openLibrary}
-          onNew={newFrame}
-          onDuplicate={duplicate}
-          onDeleteLibrary={deleteFrame}
-          onToggleText={(id) => commit(sf().touch(sf().clone(spec), {
-            texts: spec.texts.map((item) => (item.id === id ? { ...item, visible: item.visible === false } : item)),
-          }))}
-          onMoveText={(id, delta) => {
-            const items = spec.texts.slice();
-            const at = items.findIndex((item) => item.id === id);
-            const to = at + delta;
-            if (at < 0 || to < 0 || to >= items.length) return;
-            const [moved] = items.splice(at, 1);
-            items.splice(to, 0, moved);
-            commit(sf().touch(sf().clone(spec), { texts: items }));
-          }}
-          onToggleOverlay={() => {
-            if (!spec.overlay) return;
-            const active = spec.overlay;
-            if (!active) return;
-            const next = sf().clone(spec);
-            next.overlay = { dataUrl: active.dataUrl, layer: active.layer, opacity: active.opacity > 0 ? 0 : 1 };
-            commit(sf().touch(next, {}));
-          }}
-          onToggleEmblem={() => {
-            const next = sf().clone(spec);
-            next.emblem.enabled = !next.emblem.enabled;
-            commit(sf().touch(next, {}));
-          }}
-          onRemoveOverlay={() => {
-            const next = sf().clone(spec);
-            delete next.overlay;
-            commit(sf().touch(next, {}));
+          theme={theme}
+          dirty={dirty}
+          onTheme={() => setTheme(theme === 'navy' ? 'iris' : 'navy')}
+          onHelp={() => setHelpOpen(true)}
+          onImportJson={() => importInput.current?.click()}
+          onReset={resetStudio}
+        />
+
+        <main className={`workspace${leftOpen ? ' left-open' : ''}${rightOpen ? ' right-open' : ''}`}>
+          <StageCanvas
+            spec={spec}
+            slots={slots}
+            fields={fields}
+            selection={selection}
+            grid={grid}
+            zoom={zoom}
+            onScale={setScale}
+            onSelect={selectFromCanvas}
+            onSpecChange={commit}
+            onSlotFile={addSlotFile}
+          />
+
+          <div
+            className={`sheet-backdrop${leftOpen || rightOpen ? ' show' : ''}`}
+            onClick={closeDrawers}
+            aria-hidden="true"
+          />
+
+          <LeftDrawer
+            open={leftOpen}
+            tab={leftTab}
+            spec={spec}
+            slots={slots}
+            slotNames={slotNames}
+            selection={selection}
+            library={library}
+            activeId={spec.id}
+            onTab={setLeftTab}
+            onClose={() => setLeftOpen(false)}
+            onSelect={selectAndEdit}
+            onPreset={applyPreset}
+            onOpenLibrary={openLibrary}
+            onNew={newFrame}
+            onDuplicate={duplicate}
+            onDeleteLibrary={deleteFrame}
+            onToggleText={(id) => commit(sf().touch(sf().clone(spec), {
+              texts: spec.texts.map((item) => (item.id === id ? { ...item, visible: item.visible === false } : item)),
+            }))}
+            onMoveText={(id, delta) => {
+              const items = spec.texts.slice();
+              const at = items.findIndex((item) => item.id === id);
+              const to = at + delta;
+              if (at < 0 || to < 0 || to >= items.length) return;
+              const [moved] = items.splice(at, 1);
+              items.splice(to, 0, moved);
+              commit(sf().touch(sf().clone(spec), { texts: items }));
+            }}
+            onToggleOverlay={() => {
+              const active = spec.overlay;
+              if (!active) return;
+              const next = sf().clone(spec);
+              next.overlay = { dataUrl: active.dataUrl, layer: active.layer, opacity: active.opacity > 0 ? 0 : 1 };
+              commit(sf().touch(next, {}));
+            }}
+            onToggleEmblem={() => {
+              const next = sf().clone(spec);
+              next.emblem.enabled = !next.emblem.enabled;
+              commit(sf().touch(next, {}));
+            }}
+            onRemoveOverlay={() => {
+              const next = sf().clone(spec);
+              delete next.overlay;
+              commit(sf().touch(next, {}));
+            }}
+          />
+
+          <RightDrawer
+            open={rightOpen}
+            spec={spec}
+            selection={selection}
+            onClose={() => setRightOpen(false)}
+            onChange={commit}
+            onOverlayFile={addOverlay}
+            onRemoveOverlay={() => {
+              const next = sf().clone(spec);
+              delete next.overlay;
+              commit(sf().touch(next, {}));
+            }}
+            onSlotFile={addSlotFile}
+          />
+
+          <FloatingDock
+            leftOpen={leftOpen}
+            leftTab={leftTab}
+            rightOpen={rightOpen}
+            hasSelection={!!selection}
+            zoom={zoom}
+            grid={grid}
+            scale={scale}
+            saving={saving}
+            onLeft={openLeft}
+            onProps={() => setRightOpen((open) => !open)}
+            onZoom={setZoom}
+            onGrid={setGrid}
+            onSave={saveFile}
+            onCopyLink={copyLink}
+            onOpenIn={openIn}
+          />
+        </main>
+
+        <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} onOpenIn={openIn} />
+
+        {toast && <div className={`toast ${toast.tone}`} role="status">{toast.text}</div>}
+
+        <input
+          ref={importInput}
+          type="file"
+          accept=".json,application/json,*/*"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void importJson(file);
+            event.target.value = '';
           }}
         />
-        <StageCanvas
-          spec={spec}
-          slots={slots}
-          fields={fields}
-          selection={selection}
-          grid={grid}
-          zoom={zoom}
-          onZoom={setZoom}
-          onGrid={setGrid}
-          onSelect={setSelection}
-          onSpecChange={commit}
-          onSlotFile={addSlotFile}
-        />
-        <RightPanel
-          spec={spec}
-          selection={selection}
-          onChange={commit}
-          onOverlayFile={addOverlay}
-          onRemoveOverlay={() => {
-            const next = sf().clone(spec);
-            delete next.overlay;
-            commit(sf().touch(next, {}));
-          }}
-          onSlotFile={addSlotFile}
-        />
-      </main>
-      <nav className="tabbar" aria-label="패널 선택">
-        <button type="button" className={tab === 'frames' ? 'on' : ''} onClick={() => setTab('frames')}><Icon name="folder" size={16} />프리셋</button>
-        <button type="button" className={tab === 'stage' ? 'on' : ''} onClick={() => setTab('stage')}><Icon name="image" size={16} />캔버스</button>
-        <button type="button" className={tab === 'props' ? 'on' : ''} onClick={() => setTab('props')}><Icon name="sliders" size={16} />속성</button>
-      </nav>
-      {toast && <div className={`toast ${toast.tone}`} role="status">{toast.text}</div>}
-      <input
-        ref={importInput}
-        type="file"
-        accept=".json,application/json,*/*"
-        hidden
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) void importJson(file);
-          event.target.value = '';
-        }}
-      />
-    </div>
+      </div>
+    </I18nContext.Provider>
   );
 }
 

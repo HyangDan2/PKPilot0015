@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { sf, type FrameFields, type FrameSlot, type ShutterFrameSpec } from '../spec/shutterframe';
-import { Icon } from './Icons';
+import { useI18n } from '../i18n';
 import type { Selection } from '../editor/selection';
 
 export interface StageCanvasProps {
@@ -10,8 +10,7 @@ export interface StageCanvasProps {
   selection: Selection;
   grid: boolean;
   zoom: number | 'fit';
-  onZoom: (zoom: number | 'fit') => void;
-  onGrid: (value: boolean) => void;
+  onScale: (scale: number) => void;
   onSelect: (selection: Selection) => void;
   onSpecChange: (next: ShutterFrameSpec) => void;
   onSlotFile: (index: number, file: File) => void;
@@ -34,6 +33,7 @@ const SNAP = 6;
 
 export function StageCanvas(props: StageCanvasProps) {
   const { spec } = props;
+  const { t } = useI18n();
   const wrap = useRef<HTMLDivElement | null>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -60,6 +60,9 @@ export function StageCanvas(props: StageCanvasProps) {
   const designH = spec.canvas.height;
   const fit = Math.min((size.w - 48) / designW, (size.h - 48) / designH);
   const scale = props.zoom === 'fit' ? Math.max(0.05, fit) : props.zoom;
+
+  const reportScale = props.onScale;
+  useEffect(() => { reportScale(scale); }, [reportScale, scale]);
 
   const draw = useCallback(() => {
     const el = canvas.current;
@@ -333,6 +336,7 @@ export function StageCanvas(props: StageCanvasProps) {
         <canvas
           ref={canvas}
           className="stage-canvas"
+          aria-label={t('stage.canvasLabel')}
           style={{ width: '100%', height: '100%' }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -340,20 +344,9 @@ export function StageCanvas(props: StageCanvasProps) {
           onPointerCancel={endDrag}
           onDoubleClick={onDoubleClick as unknown as React.MouseEventHandler<HTMLCanvasElement>}
         />
-        <div className="stage-hint">드래그로 이동 · 모서리로 크기 조절 · 슬롯 더블클릭으로 사진 교체</div>
       </div>
-      <div className="stage-bar">
-        <div className="zoom-group" role="group" aria-label="줌">
-          <button type="button" className={`chip${props.zoom === 'fit' ? ' on' : ''}`} onClick={() => props.onZoom('fit')}>맞춤</button>
-          <button type="button" className={`chip${props.zoom === 0.5 ? ' on' : ''}`} onClick={() => props.onZoom(0.5)}>50%</button>
-          <button type="button" className={`chip${props.zoom === 1 ? ' on' : ''}`} onClick={() => props.onZoom(1)}>100%</button>
-        </div>
-        <span className="zoom-readout">{Math.round(scale * 100)}%</span>
-        <button type="button" className={`chip${props.grid ? ' on' : ''}`} onClick={() => props.onGrid(!props.grid)}>
-          <Icon name="grid" size={13} /> 그리드
-        </button>
-        <span className="stage-spec">{spec.canvas.width}×{spec.canvas.height}px · 4컷</span>
-      </div>
+      <div className="stage-hint">{t('stage.hint')}</div>
+      <div className="stage-spec">{t('stage.spec', { w: spec.canvas.width, h: spec.canvas.height, n: spec.cells.length })}</div>
       <input
         ref={fileInput}
         type="file"

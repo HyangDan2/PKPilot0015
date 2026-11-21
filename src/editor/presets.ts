@@ -39,7 +39,9 @@ function boothOverlay(): string {
 export interface PresetDef {
   id: string;
   label: string;
+  labelEn: string;
   blurb: string;
+  blurbEn: string;
   build(): ShutterFrameSpec;
 }
 
@@ -71,7 +73,9 @@ export const PRESETS: PresetDef[] = [
   {
     id: 'classic-strip',
     label: '클래식 1×4 스트립',
+    labelEn: 'Classic 1×4 strip',
     blurb: '종이 여백 위에 네 컷을 세로로. 가장 조용한 인생네컷.',
+    blurbEn: 'Four cuts stacked on quiet paper — the calmest photo booth strip.',
     build: () => assemble('Classic Strip', {
       canvas: { width: 600, height: 1800, background: '#f4f1ea', light: true },
       cells: cells([
@@ -91,7 +95,9 @@ export const PRESETS: PresetDef[] = [
   {
     id: 'nordic-grid',
     label: '노르딕 2×2 그리드',
+    labelEn: 'Nordic 2×2 grid',
     blurb: '넓은 2×2 판에 북유럽 하늘색 그라디언트.',
+    blurbEn: 'A wide 2×2 plate washed in a Nordic sky gradient.',
     build: () => assemble('Nordic Grid', {
       canvas: {
         width: 1200,
@@ -116,7 +122,9 @@ export const PRESETS: PresetDef[] = [
   {
     id: 'dark-cinema',
     label: '다크 시네마 1×4',
+    labelEn: 'Dark cinema 1×4',
     blurb: '필름 퍼포레이션이 뚫린 검은 스트립. 영화 인화 느낌.',
+    blurbEn: 'A black strip pierced with film sprockets, printed like a movie still.',
     build: () => assemble('Dark Cinema', {
       canvas: { width: 680, height: 1960, background: '#121110', light: false },
       perforation: { enabled: true, style: 'side', color: '#efe9dc', holeWidth: 16, holeHeight: 12, gap: 26 },
@@ -138,7 +146,9 @@ export const PRESETS: PresetDef[] = [
   {
     id: 'magazine-collage',
     label: '매거진 비대칭 콜라주',
+    labelEn: 'Magazine collage',
     blurb: '네 컷의 크기를 다르게 나눈 편집 디자인.',
+    blurbEn: 'An editorial layout where each of the four cuts has its own size.',
     build: () => assemble('Magazine Collage', {
       canvas: { width: 1200, height: 1600, background: '#fbf9f5', light: true },
       cells: cells([
@@ -160,7 +170,9 @@ export const PRESETS: PresetDef[] = [
   {
     id: 'photobooth-png',
     label: '포토부스 PNG 오버레이',
+    labelEn: 'Photo booth PNG overlay',
     blurb: '투명 PNG 테두리를 사진 위에 얹는 인생네컷 템플릿.',
+    blurbEn: 'A transparent PNG frame laid over the photos, like a booth print.',
     build: () => assemble('Photo Booth Overlay', {
       canvas: { width: 600, height: 1800, background: '#ffffff', light: true },
       cells: cells([
