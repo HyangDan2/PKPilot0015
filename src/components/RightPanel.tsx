@@ -14,6 +14,8 @@ export interface RightDrawerProps {
   onOverlayFile: (file: File) => void;
   onRemoveOverlay: () => void;
   onSlotFile: (index: number, file: File) => void;
+  onBackground: () => void;
+  onRemoveBackground: () => void;
 }
 
 const CANVAS_PRESETS = [
@@ -120,7 +122,10 @@ function PropertiesBody(props: RightDrawerProps) {
               <NumField label="W" value={cell.w} min={16} onChange={(v) => update({ w: v })} />
               <NumField label="H" value={cell.h} min={16} onChange={(v) => update({ h: v })} />
             </div>
-            <NumField label={t('props.corner')} value={cell.radius} min={0} max={200} onChange={(v) => update({ radius: v })} />
+            <div className="pair">
+              <NumField label={t('props.corner')} value={cell.radius} min={0} max={200} onChange={(v) => update({ radius: v })} />
+              <NumField label={t('props.rotation')} value={cell.rotation ?? 0} min={-180} max={180} onChange={(v) => update({ rotation: v })} />
+            </div>
             <div className="preset-grid">
               <button type="button" className="chip" onClick={() => {
                 const margin = Math.round(spec.canvas.width * 0.06);
@@ -195,6 +200,7 @@ function PropertiesBody(props: RightDrawerProps) {
                 <input type="color" value={toHex(item.color)} onChange={(event) => update({ color: event.target.value })} />
               </Field>
             </div>
+            <NumField label={t('props.rotation')} value={item.rotation ?? 0} min={-180} max={180} onChange={(v) => update({ rotation: v })} />
             <div className="row-btns">
               <button type="button" className="btn ghost small" onClick={() => update({ visible: item.visible === false })}>
                 <Icon name={item.visible === false ? 'eye' : 'eyeOff'} size={13} /> {item.visible === false ? t('props.showAgain') : t('props.hide')}
@@ -245,9 +251,57 @@ function PropertiesBody(props: RightDrawerProps) {
                 </select>
               </Field>
             </div>
+            <NumField label={t('props.rotation')} value={e.rotation ?? 0} min={-180} max={180} onChange={(v) => update({ rotation: v })} />
             <button type="button" className="btn ghost small" onClick={() => update({ enabled: !e.enabled })}>
               <Icon name={e.enabled ? 'eyeOff' : 'eye'} size={13} /> {e.enabled ? t('props.emblemOff') : t('props.emblemOn')}
             </button>
+          </section>
+        );
+      })()}
+
+      {selection?.kind === 'sticker' && (() => {
+        const item = (spec.stickers ?? []).find((sticker) => sticker.id === selection.id);
+        if (!item) return null;
+        const update = (p: Partial<typeof item>) => {
+          const next = sf().clone(spec);
+          next.stickers = (next.stickers ?? []).map((sticker) => (sticker.id === item.id ? { ...sticker, ...p } : sticker));
+          props.onChange(sf().touch(next, {}));
+        };
+        return (
+          <section className="rail-section">
+            <h3 className="rail-title">
+              {item.kind === 'sprite' ? t('props.sprite') : t('props.stripe')} <small>{item.label}</small>
+            </h3>
+            <div className="pair">
+              <Field label={t('props.color')}>
+                <input type="color" value={toHex(item.color)} onChange={(event) => update({ color: event.target.value })} />
+              </Field>
+              <Field label={t('props.color2')}>
+                <input type="color" value={toHex(item.color2)} onChange={(event) => update({ color2: event.target.value })} />
+              </Field>
+            </div>
+            <NumField label={t('props.opacity')} value={item.opacity * 100} min={0} max={100} onChange={(v) => update({ opacity: Math.max(0, Math.min(1, v / 100)) })} />
+            <div className="pair">
+              <NumField label="X" value={item.x} onChange={(v) => update({ x: v })} />
+              <NumField label="Y" value={item.y} onChange={(v) => update({ y: v })} />
+            </div>
+            <div className="pair">
+              <NumField label="W" value={item.w} min={8} onChange={(v) => update({ w: v })} />
+              <NumField label="H" value={item.h} min={8} onChange={(v) => update({ h: v })} />
+            </div>
+            <NumField label={t('props.rotation')} value={item.rotation} min={-180} max={180} onChange={(v) => update({ rotation: v })} />
+            <div className="row-btns">
+              <button type="button" className="btn ghost small" onClick={() => update({ visible: item.visible === false })}>
+                <Icon name={item.visible === false ? 'eye' : 'eyeOff'} size={13} /> {item.visible === false ? t('props.showAgain') : t('props.hide')}
+              </button>
+              <button type="button" className="btn ghost small danger" onClick={() => {
+                const next = sf().clone(spec);
+                next.stickers = (next.stickers ?? []).filter((sticker) => sticker.id !== item.id);
+                props.onChange(sf().touch(next, {}));
+              }}>
+                <Icon name="trash" size={13} /> {t('library.delete')}
+              </button>
+            </div>
           </section>
         );
       })()}
@@ -350,6 +404,34 @@ function PropertiesBody(props: RightDrawerProps) {
             </>
           ) : <span className="muted">{t('props.off')}</span>}
         </div>
+      </Field>
+      <Field label={t('props.backgroundImage')} hint={spec.canvas.backgroundImage ? t('props.backgroundOn') : t('props.backgroundOff')}>
+        {spec.canvas.backgroundImage ? (
+          <div className="bg-row">
+            <img className="bg-thumb" src={spec.canvas.backgroundImage.dataUrl} alt="" />
+            <div className="bg-actions">
+              <button type="button" className="btn ghost small" data-testid="props-bg-cut" onClick={props.onBackground}>
+                <Icon name="crop" size={13} />{t('props.bgCut')}
+              </button>
+              <button type="button" className="btn ghost small danger" onClick={props.onRemoveBackground}>
+                <Icon name="trash" size={13} />{t('props.remove')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className="drop-zone" data-testid="props-bg-add" onClick={props.onBackground}>
+            <Icon name="image" size={18} />
+            <span>{t('props.bgAdd')}</span>
+            <small>{t('props.bgAddHint')}</small>
+          </button>
+        )}
+        {spec.canvas.backgroundImage && (
+          <NumField label={t('props.opacity')} value={Math.round(spec.canvas.backgroundImage.opacity * 100)} min={0} max={100} onChange={(v) => {
+            const next = sf().clone(spec);
+            if (next.canvas.backgroundImage) next.canvas.backgroundImage.opacity = Math.max(0, Math.min(1, v / 100));
+            props.onChange(sf().touch(next, {}));
+          }} />
+        )}
       </Field>
     </section>
   );

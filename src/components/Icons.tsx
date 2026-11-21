@@ -26,6 +26,18 @@ const PATHS: Record<string, string> = {
   sliders: 'M3 7h12 M19 7h2 M3 17h6 M13 17h8 M15 4v6 M9 14v6',
   help: 'M12 17h.01 M9.1 9a3 3 0 1 1 6 0c0 2.1-3 2.3-3 4.1',
   chevron: 'M6 9l6 6 6-6',
+  hCenter: 'M12 2v20 M5 9h14v6H5z',
+  vCenter: 'M2 12h20 M9 5h6v14H9z',
+  alignLeft: 'M3 3v18 M7 8h11v3H7z M7 14h7v3H7z',
+  alignRight: 'M21 3v18 M6 8h11v3H6z M10 14h7v3h-7z',
+  alignTop: 'M3 3h18 M8 7h3v11H8z M14 7h3v7h-3z',
+  alignBottom: 'M3 21h18 M8 6h3v11H8z M14 10h3v7h-3z',
+  rotate: 'M21 12a9 9 0 1 1-2.6-6.4 M21 3v6h-6',
+  reset: 'M3 12a9 9 0 1 0 2.6-6.4 M3 3v6h6',
+  sticker: 'M4 5h16v14H4z M4 12l8-7 M4 19l16-14 M12 19l8-7',
+  sprite: 'M12 3l4 4-4 4-4-4z M6 13l3 3-3 3-3-3z M18 13l3 3-3 3-3-3z',
+  crop: 'M6 2v16h16 M2 6h16v16',
+  plusCircle: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18 M12 8v8 M8 12h8',
 };
 
 export function Icon({ name, size = 16, style }: { name: string; size?: number; style?: CSSProperties }) {

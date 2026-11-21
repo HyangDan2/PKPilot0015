@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sf, loadEngine, type FrameFields, type FrameSlot, type ShutterFrameSpec } from './spec/shutterframe';
+import { sf, loadEngine, layerRef, type AlignMode, type FrameFields, type FrameSlot, type LayerRef, type ShutterFrameSpec } from './spec/shutterframe';
 import { Header } from './components/Header';
 import { LeftDrawer, type LeftTab, type LibraryItem } from './components/LeftDrawer';
 import { StageCanvas } from './components/StageCanvas';
 import { RightDrawer } from './components/RightPanel';
 import { FloatingDock } from './components/FloatingDock';
 import { HelpModal } from './components/HelpModal';
+import { ContextToolbar } from './components/ContextToolbar';
+import { StickerDrawer, PALETTES } from './components/StickerDrawer';
+import { BackgroundCropModal } from './components/BackgroundCropModal';
 import { PRESETS, DEMO_FIELDS, blankSpec } from './editor/presets';
 import { loadDemoSlots, slotFromFile } from './editor/photos';
+import { prepareSprite } from './editor/images';
 import type { Selection } from './editor/selection';
 import { I18nContext, translate, type Lang, type TKey, type Vars } from './i18n';
 
@@ -39,10 +43,16 @@ export default function App() {
   const [leftTab, setLeftTab] = useState<LeftTab>('presets');
   const [rightOpen, setRightOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [stickerOpen, setStickerOpen] = useState(false);
+  const [cropOpen, setCropOpen] = useState(false);
+  const [palette, setPalette] = useState(PALETTES[0].id);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null);
   const importInput = useRef<HTMLInputElement | null>(null);
+  const spriteInput = useRef<HTMLInputElement | null>(null);
+  const slotInput = useRef<HTMLInputElement | null>(null);
+  const slotIndex = useRef(0);
   const saveTimer = useRef<number>(0);
   const toastTimer = useRef<number>(0);
   const fields = useMemo<FrameFields>(() => ({ ...DEMO_FIELDS }), []);
@@ -94,10 +104,17 @@ export default function App() {
         initial = incoming;
         say(translate(storedLang(), 'toast.fromLink'));
       } else {
-        const rows = await sf().store.list();
+        /* a webview that blocks IndexedDB still opens on a frame to touch */
+        let rows: ShutterFrameSpec[] = [];
+        try {
+          rows = await sf().store.list();
+        } catch {
+          rows = [];
+        }
         initial = rows.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0] ?? PRESETS[0].build();
-        if (!rows.length && initial.overlay) await sf().primeOverlay(initial);
       }
+      /* a background photograph or a sprite must arrive before the first paint */
+      await sf().primeAssets(initial);
       if (!alive) return;
       setSpec(initial);
       setReady(true);
@@ -121,7 +138,7 @@ export default function App() {
         incoming = null;
       }
       if (!incoming) return;
-      setSpec(incoming);
+      void sf().primeAssets(incoming).then(() => setSpec(incoming as ShutterFrameSpec));
       setSelection(null);
       say(t('toast.fromLink'));
       if (window.location.hash.indexOf('frame=') >= 0) {
@@ -174,21 +191,33 @@ export default function App() {
   const closeDrawers = useCallback(() => {
     setLeftOpen(false);
     setRightOpen(false);
+    setStickerOpen(false);
   }, []);
 
   const openLeft = useCallback((tab: LeftTab) => {
     setLeftOpen((open) => (open && leftTab === tab ? false : true));
     setLeftTab(tab);
+    setStickerOpen(false);
   }, [leftTab]);
+
+  const openRight = useCallback(() => {
+    setRightOpen((open) => !open);
+    setStickerOpen(false);
+  }, []);
 
   const selectFromCanvas = useCallback((value: Selection) => {
     setSelection(value);
-    if (value && typeof window !== 'undefined' && window.matchMedia(WIDE).matches) setRightOpen(true);
+    if (value && typeof window !== 'undefined' && window.matchMedia(WIDE).matches) {
+      setRightOpen(true);
+      setStickerOpen(false);
+      setLeftOpen(false);
+    }
   }, []);
 
   const selectAndEdit = useCallback((value: Selection) => {
     setSelection(value);
     setLeftOpen(false);
+    setStickerOpen(false);
     setRightOpen(true);
   }, []);
 
@@ -200,11 +229,24 @@ export default function App() {
     /* A preset fills the frame being edited — it does not fork a new library
        entry on every click. */
     const next = { ...preset.build(), id: spec.id, updatedAt: new Date().toISOString() };
-    if (next.overlay) await sf().primeOverlay(next);
+    await sf().primeAssets(next);
     setSpec(next);
     setSelection(null);
     say(t('toast.presetApplied', { name: lang === 'en' ? preset.labelEn : preset.label }));
     setLeftOpen(false);
+  };
+
+  /** The floating 초기화 button: this frame back to its default, shelf intact. */
+  const resetFrame = async () => {
+    if (!spec) return;
+    const next = { ...PRESETS[0].build(), id: spec.id, name: spec.name, updatedAt: new Date().toISOString() };
+    await sf().primeAssets(next);
+    setSpec(next);
+    setSelection(null);
+    setDirty(true);
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => { void persist(next); }, 400);
+    say(t('toast.frameReset'));
   };
 
   const openLibrary = async (id: string) => {
@@ -213,7 +255,7 @@ export default function App() {
     await persist(spec);
     const found = await sf().store.get(id);
     if (!found) { say(t('toast.frameNotFound'), 'warn'); return; }
-    if (found.overlay) await sf().primeOverlay(found);
+    await sf().primeAssets(found);
     setSpec(found);
     setSelection(null);
     say(t('toast.frameOpened', { name: found.name }));
@@ -246,7 +288,7 @@ export default function App() {
     if (id === spec.id) {
       const rows = await sf().store.list();
       const fallback = rows[0] ?? PRESETS[0].build();
-      if (fallback.overlay) await sf().primeOverlay(fallback);
+      await sf().primeAssets(fallback);
       setSpec(fallback);
     }
     say(t('toast.deleted'));
@@ -254,7 +296,7 @@ export default function App() {
 
   const saveFile = useCallback(() => {
     if (!spec) return;
-    const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(JSON.parse(sf().serialize(spec)), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -272,7 +314,7 @@ export default function App() {
       say(t('toast.importFailed', { reason: result.errors[0] ?? t('toast.unknownFormat') }), 'warn');
       return;
     }
-    if (result.spec.overlay) await sf().primeOverlay(result.spec);
+    await sf().primeAssets(result.spec);
     setSpec(result.spec);
     setSelection(null);
     await persist(result.spec);
@@ -339,7 +381,7 @@ export default function App() {
     if (!/^data:image\//i.test(dataUrl)) { say(t('toast.notImage'), 'warn'); return; }
     const next = sf().clone(spec);
     next.overlay = { dataUrl, layer: 'above', opacity: 1 };
-    await sf().primeOverlay(next);
+    await sf().primeAssets(next);
     commit(next);
     say(t('toast.overlayAdded'));
   };
@@ -353,6 +395,152 @@ export default function App() {
     say(t('toast.reset'));
   };
 
+  /* ── the new touch tools: stickers, sprites, a background, text ──────────── */
+  const addStripe = (preset: string) => {
+    if (!spec) return;
+    const chosen = PALETTES.find((item) => item.id === palette) ?? PALETTES[0];
+    const next = sf().addSticker(spec, preset, { color: chosen.color, color2: chosen.color2 });
+    const added = (next.stickers ?? [])[(next.stickers ?? []).length - 1];
+    commit(next);
+    setStickerOpen(false);
+    if (added) {
+      setSelection({ kind: 'sticker', id: added.id });
+      if (window.matchMedia(WIDE).matches) setRightOpen(true);
+    }
+    say(t('toast.stickerAdded'));
+  };
+
+  const addSprite = async (file: File) => {
+    if (!spec) return;
+    try {
+      const prepared = await prepareSprite(file);
+      const next = sf().addSprite(spec, prepared.dataUrl, {
+        w: Math.round(spec.canvas.width * 0.36),
+        h: Math.round(spec.canvas.width * 0.36 * (prepared.h / Math.max(1, prepared.w))),
+        label: file.name.slice(0, 24),
+      });
+      const added = (next.stickers ?? [])[(next.stickers ?? []).length - 1];
+      await sf().primeAssets(next);
+      commit(next);
+      setStickerOpen(false);
+      if (added) {
+        setSelection({ kind: 'sticker', id: added.id });
+        if (window.matchMedia(WIDE).matches) setRightOpen(true);
+      }
+      say(t('toast.spriteAdded'));
+    } catch {
+      say(t('toast.spriteFailed'), 'warn');
+    }
+  };
+
+  const applyBackground = (dataUrl: string) => {
+    if (!spec) return;
+    const next = sf().clone(spec);
+    next.canvas.backgroundImage = { dataUrl, opacity: 1 };
+    next.updatedAt = new Date().toISOString();
+    void sf().primeAssets(next).then(() => commit(next));
+    setCropOpen(false);
+    say(t('toast.backgroundSet'));
+  };
+
+  const removeBackground = () => {
+    if (!spec) return;
+    const next = sf().clone(spec);
+    delete next.canvas.backgroundImage;
+    commit(sf().touch(next, {}));
+    setCropOpen(false);
+    say(t('toast.backgroundRemoved'));
+  };
+
+  const addText = () => {
+    if (!spec) return;
+    const item = {
+      id: sf().uid('text'),
+      text: '{{caption}}',
+      x: spec.canvas.width / 2,
+      y: spec.canvas.height * 0.5,
+      size: Math.max(12, Math.round(spec.canvas.width * 0.045)),
+      family: 'sans' as const,
+      weight: 600,
+      align: 'center' as const,
+      color: spec.canvas.light ? '#1b1a18' : '#f5f2e9',
+      letterSpacing: 0,
+      rotation: 0,
+      visible: true,
+    };
+    const next = sf().touch(sf().clone(spec), { texts: [...spec.texts, item] });
+    commit(next);
+    setSelection({ kind: 'text', id: item.id });
+    if (window.matchMedia(WIDE).matches) setRightOpen(true);
+    say(t('toast.textAdded'));
+  };
+
+  /* ── the selected element: align, layer step, copy, delete, hide ─────────── */
+  const selectedRef = selection && selection.kind !== 'overlay' ? layerRef(selection) : null;
+
+  const align = (mode: AlignMode) => {
+    if (!spec || !selectedRef) return;
+    commit(sf().alignLayer(spec, selectedRef, mode));
+  };
+
+  const stepLayer = (ref: LayerRef, dir: 1 | -1) => {
+    if (!spec) return;
+    const next = sf().moveLayer(spec, ref, dir);
+    if (next === spec) return;
+    commit(next);
+  };
+
+  const duplicateSelection = () => {
+    if (!spec || !selection) return;
+    if (selection.kind === 'text') {
+      const item = spec.texts.find((row) => row.id === selection.id);
+      if (!item) return;
+      const copy = { ...item, id: sf().uid('text'), x: item.x + 14, y: item.y + 14, z: undefined };
+      commit(sf().touch(sf().clone(spec), { texts: [...spec.texts, copy] }));
+      setSelection({ kind: 'text', id: copy.id });
+      return;
+    }
+    if (selection.kind === 'sticker') {
+      const item = (spec.stickers ?? []).find((row) => row.id === selection.id);
+      if (!item) return;
+      const copy = { ...item, id: sf().uid('sticker'), x: item.x + 18, y: item.y + 18, z: undefined };
+      const next = sf().clone(spec);
+      next.stickers = [...(next.stickers ?? []), copy];
+      commit(sf().touch(next, {}));
+      setSelection({ kind: 'sticker', id: copy.id });
+    }
+  };
+
+  const deleteSelection = () => {
+    if (!spec || !selectedRef) return;
+    commit(sf().removeLayer(spec, selectedRef));
+    setSelection(null);
+    say(t('toast.selectionDeleted'));
+  };
+
+  const toggleVisible = (ref: LayerRef) => {
+    if (!spec) return;
+    if (ref.kind === 'cell') {
+      say(t('toast.slotAlwaysPainted'), 'warn');
+      return;
+    }
+    const next = sf().clone(spec);
+    if (ref.kind === 'text') {
+      next.texts = next.texts.map((item) => (item.id === ref.id ? { ...item, visible: item.visible === false } : item));
+    } else if (ref.kind === 'sticker') {
+      next.stickers = (next.stickers ?? []).map((item) => (item.id === ref.id ? { ...item, visible: item.visible === false } : item));
+    } else if (ref.kind === 'emblem') {
+      next.emblem = { ...next.emblem, enabled: !next.emblem.enabled };
+    }
+    commit(sf().touch(next, {}));
+  };
+
+  const replaceSlotPhoto = () => {
+    if (selection?.kind !== 'cell') return;
+    slotIndex.current = selection.index;
+    slotInput.current?.click();
+  };
+
   /* ── keyboard: Esc closes every layer, ⌘/Ctrl+S downloads the frame ─────── */
   const saveRef = useRef(saveFile);
   useEffect(() => { saveRef.current = saveFile; }, [saveFile]);
@@ -361,6 +549,7 @@ export default function App() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setHelpOpen(false);
+        setCropOpen(false);
         closeDrawers();
         return;
       }
@@ -384,6 +573,9 @@ export default function App() {
     );
   }
 
+  const selected = selection && selection.kind !== 'overlay' ? selection : null;
+  const workspaceClass = `workspace${leftOpen ? ' left-open' : ''}${rightOpen ? ' right-open' : ''}${stickerOpen ? ' sticker-open' : ''}`;
+
   return (
     <I18nContext.Provider value={i18n}>
       <div className="app">
@@ -397,7 +589,7 @@ export default function App() {
           onReset={resetStudio}
         />
 
-        <main className={`workspace${leftOpen ? ' left-open' : ''}${rightOpen ? ' right-open' : ''}`}>
+        <main className={workspaceClass}>
           <StageCanvas
             spec={spec}
             slots={slots}
@@ -409,10 +601,26 @@ export default function App() {
             onSelect={selectFromCanvas}
             onSpecChange={commit}
             onSlotFile={addSlotFile}
+            overlay={selected ? (
+              <ContextToolbar
+                selection={selected}
+                onAlign={align}
+                onLayer={(dir) => { if (selectedRef) stepLayer(selectedRef, dir); }}
+                onDuplicate={duplicateSelection}
+                onDelete={deleteSelection}
+                onDetails={() => { setStickerOpen(false); setRightOpen(true); }}
+                onCells={(kind) => {
+                  const margin = Math.round(spec.canvas.width * (kind === '1x4' ? 0.06 : 0.05));
+                  const gutter = Math.round(spec.canvas.width * (kind === '1x4' ? 0.03 : 0.022));
+                  commit(sf().alignCells(spec, kind, margin, gutter));
+                }}
+                onReplacePhoto={replaceSlotPhoto}
+              />
+            ) : null}
           />
 
           <div
-            className={`sheet-backdrop${leftOpen || rightOpen ? ' show' : ''}`}
+            className={`sheet-backdrop${leftOpen || rightOpen || stickerOpen ? ' show' : ''}`}
             onClick={closeDrawers}
             aria-hidden="true"
           />
@@ -434,28 +642,12 @@ export default function App() {
             onNew={newFrame}
             onDuplicate={duplicate}
             onDeleteLibrary={deleteFrame}
-            onToggleText={(id) => commit(sf().touch(sf().clone(spec), {
-              texts: spec.texts.map((item) => (item.id === id ? { ...item, visible: item.visible === false } : item)),
-            }))}
-            onMoveText={(id, delta) => {
-              const items = spec.texts.slice();
-              const at = items.findIndex((item) => item.id === id);
-              const to = at + delta;
-              if (at < 0 || to < 0 || to >= items.length) return;
-              const [moved] = items.splice(at, 1);
-              items.splice(to, 0, moved);
-              commit(sf().touch(sf().clone(spec), { texts: items }));
-            }}
+            onToggleVisible={toggleVisible}
+            onLayerZ={(ref, dir) => stepLayer(ref, dir)}
             onToggleOverlay={() => {
-              const active = spec.overlay;
-              if (!active) return;
+              if (!spec.overlay) return;
               const next = sf().clone(spec);
-              next.overlay = { dataUrl: active.dataUrl, layer: active.layer, opacity: active.opacity > 0 ? 0 : 1 };
-              commit(sf().touch(next, {}));
-            }}
-            onToggleEmblem={() => {
-              const next = sf().clone(spec);
-              next.emblem.enabled = !next.emblem.enabled;
+              if (next.overlay) next.overlay.opacity = next.overlay.opacity > 0 ? 0 : 1;
               commit(sf().touch(next, {}));
             }}
             onRemoveOverlay={() => {
@@ -463,6 +655,7 @@ export default function App() {
               delete next.overlay;
               commit(sf().touch(next, {}));
             }}
+            onBackground={() => { setLeftOpen(false); setCropOpen(true); }}
           />
 
           <RightDrawer
@@ -478,6 +671,17 @@ export default function App() {
               commit(sf().touch(next, {}));
             }}
             onSlotFile={addSlotFile}
+            onBackground={() => { setRightOpen(false); setCropOpen(true); }}
+            onRemoveBackground={removeBackground}
+          />
+
+          <StickerDrawer
+            open={stickerOpen}
+            palette={palette}
+            onPalette={setPalette}
+            onClose={() => setStickerOpen(false)}
+            onStripe={addStripe}
+            onSprite={(file) => { void addSprite(file); }}
           />
 
           <FloatingDock
@@ -490,14 +694,29 @@ export default function App() {
             scale={scale}
             saving={saving}
             onLeft={openLeft}
-            onProps={() => setRightOpen((open) => !open)}
+            onProps={openRight}
             onZoom={setZoom}
             onGrid={setGrid}
             onSave={saveFile}
             onCopyLink={copyLink}
             onOpenIn={openIn}
+            onAddSticker={() => { closeDrawers(); setStickerOpen(true); }}
+            onAddSprite={() => spriteInput.current?.click()}
+            onAddBackground={() => { closeDrawers(); setCropOpen(true); }}
+            onAddText={addText}
+            onReset={() => { void resetFrame(); }}
           />
         </main>
+
+        <BackgroundCropModal
+          open={cropOpen}
+          frameW={spec.canvas.width}
+          frameH={spec.canvas.height}
+          current={spec.canvas.backgroundImage?.dataUrl}
+          onClose={() => setCropOpen(false)}
+          onApply={applyBackground}
+          onRemove={removeBackground}
+        />
 
         <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} onOpenIn={openIn} />
 
@@ -511,6 +730,29 @@ export default function App() {
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) void importJson(file);
+            event.target.value = '';
+          }}
+        />
+        <input
+          ref={spriteInput}
+          type="file"
+          accept="image/png,image/webp,image/svg+xml"
+          hidden
+          data-testid="sprite-input"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void addSprite(file);
+            event.target.value = '';
+          }}
+        />
+        <input
+          ref={slotInput}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void addSlotFile(slotIndex.current, file);
             event.target.value = '';
           }}
         />

@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { sf, type FrameFields, type FrameSlot, type ShutterFrameSpec } from '../spec/shutterframe';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { sf, layerRef, type FrameFields, type FrameSlot, type LayerBounds, type LayerRef, type ShutterFrameSpec } from '../spec/shutterframe';
 import { useI18n } from '../i18n';
 import type { Selection } from '../editor/selection';
+import {
+  clamp, handlePoints, hitHandle, resizeBox, snapAngle, snapMove,
+  type Box, type Corner, type Handle, type Point,
+} from '../editor/geometry';
 
 export interface StageCanvasProps {
   spec: ShutterFrameSpec;
@@ -10,59 +14,105 @@ export interface StageCanvasProps {
   selection: Selection;
   grid: boolean;
   zoom: number | 'fit';
+  /** The scale the plate is actually drawn at, for the dock's readout. */
   onScale: (scale: number) => void;
   onSelect: (selection: Selection) => void;
   onSpecChange: (next: ShutterFrameSpec) => void;
   onSlotFile: (index: number, file: File) => void;
+  /** The compact bar for the selected element, drawn over the plate. */
+  overlay?: React.ReactNode;
 }
 
-type DragMode = 'move' | 'resize';
-type Corner = 'nw' | 'ne' | 'sw' | 'se';
+type DragMode = 'move' | 'resize' | 'rotate' | 'pinch';
 
 interface DragState {
   mode: DragMode;
-  target: Selection;
-  corner?: Corner;
-  startX: number;
-  startY: number;
+  target: Exclude<Selection, null>;
   base: ShutterFrameSpec;
+  next: ShutterFrameSpec;
+  box: LayerBounds;
+  start: Point;
+  corner?: Corner;
+  startAngle?: number;
+  pinch?: { dist: number; angle: number; mid: Point; rotation: number };
+  moved: boolean;
 }
 
-const HANDLE = 9;
-const SNAP = 6;
-
+/**
+ * The plate, and a finger's whole vocabulary on it: tap to select, drag to
+ * move (with magnet guides), corner grips to grow or shrink, the top grip to
+ * turn, two fingers to pinch and twist. Nothing here needs an input box.
+ */
 export function StageCanvas(props: StageCanvasProps) {
-  const { spec } = props;
   const { t } = useI18n();
+  const { spec, selection } = props;
   const wrap = useRef<HTMLDivElement | null>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
-  const pendingSlot = useRef<number>(0);
+  const pendingSlot = useRef(0);
   const drag = useRef<DragState | null>(null);
-  const boxes = useRef<{ texts: Record<string, Box>; emblem: Box | null }>({ texts: {}, emblem: null });
+  const pointers = useRef<Map<number, Point>>(new Map());
   const [size, setSize] = useState({ w: 720, h: 640 });
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
+  const [angleBadge, setAngleBadge] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     const host = wrap.current;
     if (!host) return;
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (rect) setSize({ w: Math.max(120, Math.round(rect.width)), h: Math.max(160, Math.round(rect.height)) });
-    });
+    const read = () => {
+      const rect = host.getBoundingClientRect();
+      setSize({ w: Math.max(120, Math.round(rect.width)), h: Math.max(160, Math.round(rect.height)) });
+    };
+    read();
+    const observer = new ResizeObserver(read);
     observer.observe(host);
-    const rect = host.getBoundingClientRect();
-    setSize({ w: Math.max(120, Math.round(rect.width)), h: Math.max(160, Math.round(rect.height)) });
     return () => observer.disconnect();
   }, []);
 
   const designW = spec.canvas.width;
   const designH = spec.canvas.height;
-  const fit = Math.min((size.w - 48) / designW, (size.h - 48) / designH);
+  const fit = Math.min((size.w - 40) / designW, (size.h - 40) / designH);
   const scale = props.zoom === 'fit' ? Math.max(0.05, fit) : props.zoom;
+  const vars = useMemo(() => sf().buildVars(spec, props.fields), [spec, props.fields]);
 
-  const reportScale = props.onScale;
-  useEffect(() => { reportScale(scale); }, [reportScale, scale]);
+  const scaleRef = useRef(props.onScale);
+  useEffect(() => { scaleRef.current = props.onScale; }, [props.onScale]);
+  useEffect(() => { scaleRef.current(scale); }, [scale]);
+
+  /* One measurer for hit testing, handles and the engine's own boxes. */
+  const measure = useCallback((item: { size: number; weight: number; family: string; letterSpacing: number }, content: string) => {
+    const ctx = canvas.current?.getContext('2d');
+    const text = content || '';
+    if (!ctx) return Math.max(12, text.length * item.size * 0.56);
+    ctx.save();
+    ctx.font = `${item.weight} ${item.size}px ${sf().FONTS[item.family as 'sans' | 'serif' | 'mono'] ?? sf().FONTS.sans}`;
+    const width = ctx.measureText(text).width + (item.letterSpacing ? Math.abs(item.letterSpacing) * text.length : 0);
+    ctx.restore();
+    return width;
+  }, []);
+
+  const boundsOf = useCallback((s: ShutterFrameSpec, sel: Exclude<Selection, null>): LayerBounds | null => {
+    const ref = layerRef(sel);
+    if (!ref) return null;
+    return sf().boundsOf(s, { ...ref, vars } as LayerRef & { vars: Record<string, string> }, measure);
+  }, [measure, vars]);
+
+  const othersOf = useCallback((s: ShutterFrameSpec, target: Selection): Box[] => {
+    const key = target ? layerRef(target) : null;
+    const selfKey = key ? (key.kind === 'cell' ? `cell:${key.index}` : key.kind === 'text' ? `text:${key.id}` : key.kind === 'sticker' ? `sticker:${key.id}` : 'emblem') : '';
+    const boxes: Box[] = [];
+    sf().paintOrder(s).forEach((row) => {
+      if (row.key === selfKey || row.kind === 'overlay') return;
+      const ref: LayerRef = row.kind === 'cell'
+        ? { kind: 'cell', index: row.index ?? 0 }
+        : row.kind === 'emblem'
+          ? { kind: 'emblem' }
+          : { kind: row.kind as 'text' | 'sticker', id: row.id ?? '' };
+      const b = sf().boundsOf(s, { ...ref, vars } as LayerRef & { vars: Record<string, string> }, measure);
+      if (b) boxes.push({ x: b.x, y: b.y, w: b.w, h: b.h });
+    });
+    return boxes;
+  }, [measure, vars]);
 
   const draw = useCallback(() => {
     const el = canvas.current;
@@ -84,9 +134,9 @@ export function StageCanvas(props: StageCanvasProps) {
     const oy = (ch - designH * s) / 2;
 
     ctx.save();
-    ctx.shadowColor = 'rgba(24,16,48,0.22)';
-    ctx.shadowBlur = 22;
-    ctx.shadowOffsetY = 8;
+    ctx.shadowColor = 'rgba(4,7,16,0.45)';
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 10;
     ctx.fillStyle = spec.canvas.light ? '#ffffff' : '#0e0c16';
     ctx.fillRect(ox, oy, designW * s, designH * s);
     ctx.restore();
@@ -111,78 +161,81 @@ export function StageCanvas(props: StageCanvasProps) {
       ctx.restore();
     }
 
-    // cell outlines + slot numbers
+    /* slot outlines + numbers, quietly, so a photo never hides where a cut goes */
     spec.cells.forEach((cell, index) => {
-      const active = props.selection?.kind === 'cell' && props.selection.index === index;
+      const active = selection?.kind === 'cell' && selection.index === index;
       ctx.save();
-      ctx.lineWidth = (active ? 2 : 1) / s;
-      ctx.strokeStyle = active ? '#8b5cf6' : (spec.canvas.light ? 'rgba(60,44,90,0.16)' : 'rgba(235,226,255,0.16)');
+      ctx.lineWidth = (active ? 1.6 : 1) / s;
+      ctx.strokeStyle = active ? '#a78bfa' : (spec.canvas.light ? 'rgba(60,44,90,0.14)' : 'rgba(235,226,255,0.14)');
       if (!active) ctx.setLineDash([5 / s, 6 / s]);
-      sf().helpers.roundRect(ctx, cell.x, cell.y, cell.w, cell.h, cell.radius);
+      ctx.translate(cell.x + cell.w / 2, cell.y + cell.h / 2);
+      ctx.rotate(((cell.rotation ?? 0) * Math.PI) / 180);
+      sf().helpers.roundRect(ctx, -cell.w / 2, -cell.h / 2, cell.w, cell.h, cell.radius);
       ctx.stroke();
       ctx.restore();
       ctx.save();
       const label = (index + 1).toString().padStart(2, '0');
-      const fs = 13 / s;
+      const fs = 12 / s;
       ctx.font = `700 ${fs}px ${sf().FONTS.sans}`;
-      const padX = 7 / s;
+      const padX = 6 / s;
       const bw = ctx.measureText(label).width + padX * 2;
       const bh = fs * 1.55;
-      ctx.fillStyle = active ? 'rgba(139,92,246,0.95)' : 'rgba(20,16,32,0.55)';
-      sf().helpers.roundRect(ctx, cell.x + 8 / s, cell.y + 8 / s, bw, bh, bh / 2);
+      ctx.fillStyle = active ? 'rgba(167,139,250,0.95)' : 'rgba(8,12,24,0.55)';
+      sf().helpers.roundRect(ctx, cell.x + 7 / s, cell.y + 7 / s, bw, bh, bh / 2);
       ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, cell.x + 8 / s + padX, cell.y + 8 / s + bh / 2 + 0.5 / s);
+      ctx.fillText(label, cell.x + 7 / s + padX, cell.y + 7 / s + bh / 2 + 0.5 / s);
       ctx.restore();
     });
 
-    // text + emblem boxes (measured here so hit testing matches what is drawn)
-    const vars = sf().buildVars(spec, props.fields);
-    const textBoxes: Record<string, Box> = {};
-    spec.texts.forEach((item) => {
-      if (item.visible === false) return;
-      const content = sf().applyVars(item.text, vars);
-      if (!content) return;
-      ctx.save();
-      ctx.font = `${item.weight} ${item.size}px ${sf().FONTS[item.family]}`;
-      const width = ctx.measureText(content).width + Math.abs(item.letterSpacing) * content.length;
-      const left = item.align === 'left' ? item.x : item.align === 'right' ? item.x - width : item.x - width / 2;
-      const top = item.y - item.size * 0.82;
-      const box = { x: left, y: top, w: width, h: item.size * 1.1 };
-      textBoxes[item.id] = box;
-      const active = props.selection?.kind === 'text' && props.selection.id === item.id;
-      /* Only the selected row wears a box: the plate itself stays clean. */
-      if (active) {
-        ctx.lineWidth = 1.6 / s;
-        ctx.strokeStyle = '#8b5cf6';
-        ctx.setLineDash([]);
-        ctx.strokeRect(box.x - 3 / s, box.y, box.w + 6 / s, box.h);
-      }
-      ctx.restore();
-    });
-    boxes.current.texts = textBoxes;
-
-    let emblemBox: Box | null = null;
-    if (spec.emblem.enabled) {
-      const e = spec.emblem;
-      const mw = Math.min(e.maxW, e.maxH * 3.4);
-      const left = e.align === 'left' ? e.x : e.align === 'right' ? e.x - mw : e.x - mw / 2;
-      emblemBox = { x: left, y: e.y - e.maxH / 2, w: mw, h: e.maxH };
-      boxes.current.emblem = emblemBox;
-      const active = props.selection?.kind === 'emblem';
-      if (active) {
+    /* the selection: one turned box, four corner grips, one rotation grip */
+    if (selection && selection.kind !== 'overlay') {
+      const b = boundsOf(spec, selection);
+      if (b) {
+        const pts = handlePoints(b, scale);
         ctx.save();
+        ctx.lineWidth = 1.8 / s;
+        ctx.strokeStyle = '#a78bfa';
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(pts.nw.x, pts.nw.y);
+        ctx.lineTo(pts.ne.x, pts.ne.y);
+        ctx.lineTo(pts.se.x, pts.se.y);
+        ctx.lineTo(pts.sw.x, pts.sw.y);
+        ctx.closePath();
+        ctx.stroke();
+
+        const top = { x: (pts.nw.x + pts.ne.x) / 2, y: (pts.nw.y + pts.ne.y) / 2 };
+        ctx.beginPath();
+        ctx.moveTo(top.x, top.y);
+        ctx.lineTo(pts.rotate.x, pts.rotate.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(pts.rotate.x, pts.rotate.y, 9 / s, 0, Math.PI * 2);
+        ctx.fillStyle = '#a78bfa';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(pts.rotate.x, pts.rotate.y, 3.4 / s, 0.4, Math.PI * 1.75);
+        ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.6 / s;
-        ctx.strokeStyle = '#8b5cf6';
-        ctx.strokeRect(emblemBox.x, emblemBox.y, emblemBox.w, emblemBox.h);
+        ctx.stroke();
+
+        const hs = 11 / s;
+        (['nw', 'ne', 'sw', 'se'] as Corner[]).forEach((corner) => {
+          const p = pts[corner];
+          ctx.beginPath();
+          sf().helpers.roundRect(ctx, p.x - hs / 2, p.y - hs / 2, hs, hs, 2.5 / s);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.strokeStyle = '#a78bfa';
+          ctx.lineWidth = 1.6 / s;
+          ctx.stroke();
+        });
         ctx.restore();
       }
-    } else {
-      boxes.current.emblem = null;
     }
 
-    // snap guides
     if (guides.v.length || guides.h.length) {
       ctx.save();
       ctx.strokeStyle = 'rgba(236,72,153,0.9)';
@@ -191,142 +244,271 @@ export function StageCanvas(props: StageCanvasProps) {
       guides.h.forEach((y) => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(designW, y); ctx.stroke(); });
       ctx.restore();
     }
-
-    // corner handles
-    const cell = props.selection?.kind === 'cell' ? spec.cells[props.selection.index] : null;
-    if (cell) {
-      const hs = HANDLE / s;
-      const corners: [Corner, number, number][] = [
-        ['nw', cell.x, cell.y], ['ne', cell.x + cell.w, cell.y],
-        ['sw', cell.x, cell.y + cell.h], ['se', cell.x + cell.w, cell.y + cell.h],
-      ];
-      corners.forEach(([, cx, cy]) => {
-        ctx.save();
-        ctx.fillStyle = '#ffffff';
-        ctx.strokeStyle = '#8b5cf6';
-        ctx.lineWidth = 1.6 / s;
-        ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
-        ctx.strokeRect(cx - hs / 2, cy - hs / 2, hs, hs);
-        ctx.restore();
-      });
-    }
     ctx.restore();
-  }, [spec, props.slots, props.fields, props.selection, props.grid, scale, size, designW, designH, guides]);
+  }, [spec, props.slots, props.fields, props.grid, selection, scale, size, designW, designH, guides, boundsOf]);
 
   useEffect(() => { draw(); }, [draw]);
 
-  const toDesign = (event: React.PointerEvent<HTMLCanvasElement>) => {
+  /* a background photo, a sprite or a PNG that lands late repaints the plate */
+  useEffect(() => sf().onAssetsLoaded(() => draw()), [draw]);
+
+  const toDesign = useCallback((clientX: number, clientY: number): Point => {
     const el = canvas.current;
     if (!el) return { x: 0, y: 0 };
     const rect = el.getBoundingClientRect();
     const ox = (rect.width - designW * scale) / 2;
     const oy = (rect.height - designH * scale) / 2;
-    return { x: (event.clientX - rect.left - ox) / scale, y: (event.clientY - rect.top - oy) / scale };
-  };
+    return { x: (clientX - rect.left - ox) / scale, y: (clientY - rect.top - oy) / scale };
+  }, [designW, designH, scale]);
 
-  const hitCorner = (pt: Point, cell: { x: number; y: number; w: number; h: number }): Corner | null => {
-    const r = HANDLE / scale + 3 / scale;
-    const near = (x: number, y: number) => Math.abs(pt.x - x) <= r && Math.abs(pt.y - y) <= r;
-    if (near(cell.x, cell.y)) return 'nw';
-    if (near(cell.x + cell.w, cell.y)) return 'ne';
-    if (near(cell.x, cell.y + cell.h)) return 'sw';
-    if (near(cell.x + cell.w, cell.y + cell.h)) return 'se';
-    return null;
-  };
-
-  const hitTest = (pt: Point): Selection => {
-    if (props.selection?.kind === 'cell') {
-      const cell = spec.cells[props.selection.index];
-      if (cell && hitCorner(pt, cell)) return props.selection;
-    }
-    const texts = spec.texts;
-    for (let i = texts.length - 1; i >= 0; i -= 1) {
-      const box = boxes.current.texts[texts[i].id];
-      if (box && inside(pt, box)) return { kind: 'text', id: texts[i].id };
-    }
-    const emblem = boxes.current.emblem;
-    if (emblem && spec.emblem.enabled && inside(pt, emblem)) return { kind: 'emblem' };
-    for (let i = spec.cells.length - 1; i >= 0; i -= 1) {
-      if (inside(pt, spec.cells[i])) return { kind: 'cell', index: i };
+  const hitTest = useCallback((s: ShutterFrameSpec, pt: Point): Selection => {
+    const rows = sf().paintOrder(s).slice().reverse();
+    for (const row of rows) {
+      if (row.kind === 'overlay') continue;
+      const ref: LayerRef = row.kind === 'cell'
+        ? { kind: 'cell', index: row.index ?? 0 }
+        : row.kind === 'emblem'
+          ? { kind: 'emblem' }
+          : { kind: row.kind as 'text' | 'sticker', id: row.id ?? '' };
+      if (sf().hitLayer(s, { ...ref, vars } as LayerRef & { vars: Record<string, string> }, pt, measure)) {
+        if (ref.kind === 'cell') return { kind: 'cell', index: ref.index };
+        if (ref.kind === 'text') return { kind: 'text', id: ref.id };
+        if (ref.kind === 'sticker') return { kind: 'sticker', id: ref.id };
+        return { kind: 'emblem' };
+      }
     }
     return null;
+  }, [measure, vars]);
+
+  const pinchOf = (box: LayerBounds) => {
+    const pts = Array.from(pointers.current.values());
+    if (pts.length < 2) return undefined;
+    const [a, b] = pts;
+    return {
+      dist: Math.hypot(b.x - a.x, b.y - a.y),
+      angle: Math.atan2(b.y - a.y, b.x - a.x),
+      mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      rotation: box.rotation,
+    };
+  };
+
+  const begin = (mode: DragMode, target: Exclude<Selection, null>, box: LayerBounds, pt: Point, corner?: Corner) => {
+    drag.current = {
+      mode, target, base: spec, next: sf().clone(spec), box, start: pt, corner, moved: false,
+      startAngle: Math.atan2(pt.y - box.cy, pt.x - box.cx) * 180 / Math.PI,
+    };
+  };
+
+  const mutateRect = (target: Exclude<Selection, null>, rect: { x: number; y: number; w: number; h: number }, next: ShutterFrameSpec) => {
+    if (target.kind === 'cell') {
+      const cell = next.cells[target.index];
+      if (!cell) return;
+      cell.x = Math.round(rect.x); cell.y = Math.round(rect.y);
+      cell.w = Math.max(16, Math.round(rect.w)); cell.h = Math.max(16, Math.round(rect.h));
+    } else if (target.kind === 'sticker') {
+      const st = (next.stickers ?? []).find((item) => item.id === target.id);
+      if (!st) return;
+      st.x = Math.round(rect.x); st.y = Math.round(rect.y);
+      st.w = Math.max(8, Math.round(rect.w)); st.h = Math.max(8, Math.round(rect.h));
+    }
+  };
+
+  const setRotation = (target: Exclude<Selection, null>, next: ShutterFrameSpec, deg: number) => {
+    if (target.kind === 'cell') {
+      const cell = next.cells[target.index];
+      if (cell) cell.rotation = Math.round(deg * 10) / 10;
+    } else if (target.kind === 'text') {
+      const t2 = next.texts.find((item) => item.id === target.id);
+      if (t2) t2.rotation = Math.round(deg * 10) / 10;
+    } else if (target.kind === 'sticker') {
+      const st = (next.stickers ?? []).find((item) => item.id === target.id);
+      if (st) st.rotation = Math.round(deg * 10) / 10;
+    } else if (target.kind === 'emblem') {
+      next.emblem.rotation = Math.round(deg * 10) / 10;
+    }
+  };
+
+  const moveRef = (target: Exclude<Selection, null>, next: ShutterFrameSpec, dx: number, dy: number) => {
+    if (target.kind === 'cell') {
+      const cell = next.cells[target.index];
+      if (cell) { cell.x = Math.round(cell.x + dx); cell.y = Math.round(cell.y + dy); }
+    } else if (target.kind === 'text') {
+      const item = next.texts.find((row) => row.id === target.id);
+      if (item) { item.x = Math.round(item.x + dx); item.y = Math.round(item.y + dy); }
+    } else if (target.kind === 'sticker') {
+      const st = (next.stickers ?? []).find((row) => row.id === target.id);
+      if (st) { st.x = Math.round(st.x + dx); st.y = Math.round(st.y + dy); }
+    } else if (target.kind === 'emblem') {
+      next.emblem.x = Math.round(next.emblem.x + dx);
+      next.emblem.y = Math.round(next.emblem.y + dy);
+    }
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const pt = toDesign(event);
-    const hit = hitTest(pt);
+    const pt = toDesign(event.clientX, event.clientY);
+    pointers.current.set(event.pointerId, pt);
+    (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId);
+
+    if (pointers.current.size === 2) {
+      const target = selection ?? null;
+      if (target && target.kind !== 'overlay') {
+        const box = boundsOf(spec, target);
+        if (box) {
+          drag.current = {
+            mode: 'pinch', target, base: spec, next: sf().clone(spec), box, start: pt,
+            pinch: pinchOf(box), moved: false,
+          };
+          event.preventDefault();
+          return;
+        }
+      }
+    }
+    if (pointers.current.size > 1) return;
+
+    const current = selection;
+    if (current && current.kind !== 'overlay') {
+      const box = boundsOf(spec, current);
+      if (box) {
+        const handle: Handle | null = hitHandle(pt, box, scale);
+        if (handle === 'rotate') { begin('rotate', current, box, pt); return; }
+        if (handle) { begin('resize', current, box, pt, handle); return; }
+        const ref = layerRef(current);
+        if (ref && sf().hitLayer(spec, { ...ref, vars } as LayerRef & { vars: Record<string, string> }, pt, measure)) {
+          begin('move', current, box, pt);
+          return;
+        }
+      }
+    }
+
+    const hit = hitTest(spec, pt);
     props.onSelect(hit);
-    if (!hit) { drag.current = null; return; }
-    const corner = hit.kind === 'cell' && props.selection?.kind === 'cell' && props.selection.index === hit.index
-      ? hitCorner(pt, spec.cells[hit.index])
-      : null;
-    drag.current = {
-      mode: corner ? 'resize' : 'move',
-      target: hit,
-      corner: corner ?? undefined,
-      startX: pt.x,
-      startY: pt.y,
-      base: sf().clone(spec),
-    };
-    (event.target as HTMLCanvasElement).setPointerCapture(event.pointerId);
+    if (hit) {
+      const box = boundsOf(spec, hit);
+      if (box) begin('move', hit, box, pt);
+    } else {
+      drag.current = null;
+      setGuides({ v: [], h: [] });
+    }
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!pointers.current.has(event.pointerId)) return;
+    const pt = toDesign(event.clientX, event.clientY);
+    pointers.current.set(event.pointerId, pt);
     const state = drag.current;
     if (!state) return;
-    const pt = toDesign(event);
-    const dx = pt.x - state.startX;
-    const dy = pt.y - state.startY;
-    const next = sf().clone(state.base);
-    const lines = snapLines(state.base, state.target);
+    event.preventDefault();
 
-    if (state.target?.kind === 'cell') {
-      const index = state.target.index;
-      const orig = state.base.cells[index];
-      if (state.mode === 'resize' && state.corner) {
-        let { x, y, w, h } = orig;
-        if (state.corner.indexOf('e') >= 0) w = orig.w + dx;
-        if (state.corner.indexOf('s') >= 0) h = orig.h + dy;
-        if (state.corner.indexOf('w') >= 0) { x = orig.x + dx; w = orig.w - dx; }
-        if (state.corner.indexOf('n') >= 0) { y = orig.y + dy; h = orig.h - dy; }
-        w = Math.max(16, w);
-        h = Math.max(16, h);
-        next.cells[index] = { ...orig, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
-        setGuides({ v: [], h: [] });
-      } else {
-        let x = orig.x + dx;
-        let y = orig.y + dy;
-        const snapped = snapRect({ x, y, w: orig.w, h: orig.h }, state.base, index, lines);
-        x = snapped.x;
-        y = snapped.y;
-        setGuides(snapped.guides);
-        next.cells[index] = { ...orig, x: Math.round(x), y: Math.round(y) };
+    if (state.mode === 'pinch') {
+      const pts = Array.from(pointers.current.values());
+      if (pts.length < 2 || !state.pinch) return;
+      const [a, b] = pts;
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const ratio = clamp(state.pinch.dist > 4 ? dist / state.pinch.dist : 1, 0.2, 6);
+      const w = clamp(state.box.box.w * ratio, 16, designW * 3);
+      const h = clamp(state.box.box.h * ratio, 16, designH * 3);
+      const center = {
+        x: state.box.cx + (mid.x - state.pinch.mid.x),
+        y: state.box.cy + (mid.y - state.pinch.mid.y),
+      };
+      const rect = { x: center.x - w / 2, y: center.y - h / 2, w, h };
+      const next = state.next;
+      if (state.target.kind === 'cell' || state.target.kind === 'sticker') {
+        mutateRect(state.target, rect, next);
+      } else if (state.target.kind === 'text') {
+        const item = next.texts.find((row) => row.id === (state.target as { id: string }).id);
+        if (item) {
+          item.size = clamp(item.size * ratio, 6, 400);
+          item.y = Math.round(rect.y + item.size * 0.82);
+        }
+      } else if (state.target.kind === 'emblem') {
+        next.emblem.maxW = clamp(next.emblem.maxW * ratio, 8, 4000);
+        next.emblem.maxH = clamp(next.emblem.maxH * ratio, 8, 4000);
+        next.emblem.x = Math.round(center.x);
+        next.emblem.y = Math.round(center.y);
       }
-    } else if (state.target?.kind === 'text') {
-      const item = next.texts.find((t) => t.id === (state.target as { id: string }).id);
-      const baseItem = state.base.texts.find((t) => t.id === (state.target as { id: string }).id);
-      if (item && baseItem) {
-        item.x = Math.round(baseItem.x + dx);
-        item.y = Math.round(baseItem.y + dy);
-      }
-    } else if (state.target?.kind === 'emblem') {
-      next.emblem.x = Math.round(state.base.emblem.x + dx);
-      next.emblem.y = Math.round(state.base.emblem.y + dy);
+      const delta = (angle - state.pinch.angle) * 180 / Math.PI;
+      setRotation(state.target, next, state.pinch.rotation + delta);
+      state.moved = true;
+      props.onSpecChange({ ...next });
+      return;
     }
-    props.onSpecChange(next);
+
+    const target = state.target;
+    const dx = pt.x - state.start.x;
+    const dy = pt.y - state.start.y;
+    if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) state.moved = true;
+
+    if (state.mode === 'move') {
+      const moved = { ...state.box, x: state.box.x + dx, y: state.box.y + dy };
+      const snap = snapMove(moved, othersOf(state.base, target), { w: designW, h: designH }, scale);
+      setGuides(snap.guides);
+      moveRef(target, state.next, dx + snap.dx, dy + snap.dy);
+      props.onSpecChange({ ...state.next });
+      return;
+    }
+
+    if (state.mode === 'resize' && state.corner) {
+      const rect = resizeBox(state.box.box, state.box.rotation, state.corner, pt);
+      if (target.kind === 'cell' || target.kind === 'sticker') {
+        mutateRect(target, rect, state.next);
+      } else if (target.kind === 'text') {
+        const item = state.next.texts.find((row) => row.id === (target as { id: string }).id);
+        if (item) {
+          const content = sf().applyVars(item.text, vars);
+          const ratio = rect.h / Math.max(1, state.box.box.h);
+          item.size = clamp(item.size * ratio, 6, 400);
+          const width = measure(item, content);
+          item.y = Math.round(rect.y + item.size * 0.82);
+          item.x = Math.round(item.align === 'left' ? rect.x : item.align === 'right' ? rect.x + width : rect.x + width / 2);
+        }
+      } else if (target.kind === 'emblem') {
+        const ratioW = rect.w / Math.max(1, state.box.box.w);
+        const ratioH = rect.h / Math.max(1, state.box.box.h);
+        state.next.emblem.maxW = clamp(state.next.emblem.maxW * ratioW, 8, 4000);
+        state.next.emblem.maxH = clamp(state.next.emblem.maxH * ratioH, 8, 4000);
+        state.next.emblem.x = Math.round(rect.x + rect.w / 2);
+        state.next.emblem.y = Math.round(rect.y + rect.h / 2);
+      }
+      props.onSpecChange({ ...state.next });
+      return;
+    }
+
+    if (state.mode === 'rotate') {
+      const raw = Math.atan2(pt.y - state.box.cy, pt.x - state.box.cx) * 180 / Math.PI;
+      const delta = raw - (state.startAngle ?? raw);
+      const snapped = snapAngle(state.box.rotation + delta, 45, 4);
+      setRotation(target, state.next, snapped.value);
+      setAngleBadge(`${Math.round(snapped.value)}°`);
+      props.onSpecChange({ ...state.next });
+    }
   };
 
-  const endDrag = () => {
-    drag.current = null;
-    setGuides({ v: [], h: [] });
+  const endDrag = (event?: React.PointerEvent<HTMLCanvasElement>) => {
+    if (event) pointers.current.delete(event.pointerId);
+    else pointers.current.clear();
+    const state = drag.current;
+    if (state && state.moved) props.onSpecChange(sf().touch(state.next, {}));
+    if (pointers.current.size === 0) {
+      drag.current = null;
+      setGuides({ v: [], h: [] });
+      setAngleBadge(null);
+    } else if (state && state.mode === 'pinch') {
+      drag.current = null;
+      setAngleBadge(null);
+    }
   };
 
-  const onDoubleClick = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const pt = toDesign(event);
-    const cellIndex = spec.cells.findIndex((cell) => inside(pt, cell));
-    if (cellIndex >= 0) {
-      pendingSlot.current = cellIndex;
-      fileInput.current?.click();
+  const onDoubleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const pt = toDesign(event.clientX, event.clientY);
+    for (let index = 0; index < spec.cells.length; index += 1) {
+      if (sf().hitLayer(spec, { kind: 'cell', index }, pt, measure)) {
+        pendingSlot.current = index;
+        fileInput.current?.click();
+        return;
+      }
     }
   };
 
@@ -342,9 +524,11 @@ export function StageCanvas(props: StageCanvasProps) {
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
-          onDoubleClick={onDoubleClick as unknown as React.MouseEventHandler<HTMLCanvasElement>}
+          onDoubleClick={onDoubleClick}
         />
+        {angleBadge && <div className="stage-angle" role="status">{angleBadge}</div>}
       </div>
+      {props.overlay}
       <div className="stage-hint">{t('stage.hint')}</div>
       <div className="stage-spec">{t('stage.spec', { w: spec.canvas.width, h: spec.canvas.height, n: spec.cells.length })}</div>
       <input
@@ -360,56 +544,4 @@ export function StageCanvas(props: StageCanvasProps) {
       />
     </div>
   );
-}
-
-interface Point { x: number; y: number }
-interface Box { x: number; y: number; w: number; h: number }
-
-function inside(pt: Point, box: Box): boolean {
-  return pt.x >= box.x && pt.x <= box.x + box.w && pt.y >= box.y && pt.y <= box.y + box.h;
-}
-
-function snapLines(spec: ShutterFrameSpec, target: Selection): number[] {
-  const xs: number[] = [0, spec.canvas.width / 2, spec.canvas.width];
-  const ys: number[] = [0, spec.canvas.height / 2, spec.canvas.height];
-  spec.cells.forEach((cell, index) => {
-    if (target?.kind === 'cell' && target.index === index) return;
-    xs.push(cell.x, cell.x + cell.w, cell.x + cell.w / 2);
-    ys.push(cell.y, cell.y + cell.h, cell.y + cell.h / 2);
-  });
-  return [...xs, ...ys];
-}
-
-function snapRect(rect: Box, spec: ShutterFrameSpec, index: number, lines: number[]) {
-  const xs = lines.filter((n) => n <= spec.canvas.width);
-  const ys = lines.filter((n) => n <= spec.canvas.height);
-  const guides: { v: number[]; h: number[] } = { v: [], h: [] };
-  let bestX = SNAP + 1;
-  let bx = rect.x;
-  [rect.x, rect.x + rect.w / 2, rect.x + rect.w].forEach((edge, i) => {
-    xs.forEach((line) => {
-      const d = Math.abs(edge - line);
-      if (d < bestX && d <= SNAP) {
-        bestX = d;
-        bx = rect.x + (line - edge);
-        guides.v = [line];
-      }
-      void i;
-    });
-  });
-  let bestY = SNAP + 1;
-  let by = rect.y;
-  [rect.y, rect.y + rect.h / 2, rect.y + rect.h].forEach((edge) => {
-    ys.forEach((line) => {
-      const d = Math.abs(edge - line);
-      if (d < bestY && d <= SNAP) {
-        bestY = d;
-        by = rect.y + (line - edge);
-        guides.h = [line];
-      }
-    });
-  });
-  void spec;
-  void index;
-  return { x: bx, y: by, guides };
 }

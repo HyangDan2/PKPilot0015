@@ -135,6 +135,23 @@ def build_favicon_svg(path: str):
         handle.write(svg)
 
 
+def wrap_lines(d: ImageDraw.ImageDraw, text: str, f, max_width: float) -> list[str]:
+    """Breaks a caption at word boundaries so it never runs into the previews."""
+    words = text.split(" ")
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        trial = f"{current} {word}".strip()
+        if not current or d.textlength(trial, font=f) <= max_width:
+            current = trial
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
 def build_og(path: str):
     W, H = 1200, 630
     img = Image.new("RGB", (W, H), BG)
@@ -156,12 +173,21 @@ def build_og(path: str):
     # title
     d.text((96, 250), "Mynda Ljósa", font=font(78), fill=INK)
     d.text((96, 350), "커스텀 4컷 프레임 스튜디오", font=font(36), fill=ACCENT)
-    d.text(
-        (96, 410),
+
+    # the caption wraps inside the card, left of the preview strips
+    caption_font = font(21)
+    caption_left = 96
+    caption_right = 720
+    lines = wrap_lines(
+        d,
         "사진 네 장을 한 장으로. 브라우저에서 디자인하고 Shutterplate · Nordlys에서 그대로 인화합니다.",
-        font=font(21), fill=MUTED,
+        caption_font,
+        caption_right - caption_left,
     )
-    spaced(d, (96, 462), "MYNDA LJÓSA  →  SHUTTERPLATE  ·  NORDLYS", mono(17), PLUM, spacing=2.4)
+    for index, line in enumerate(lines[:2]):
+        d.text((caption_left, 404 + index * 30), line, font=caption_font, fill=MUTED)
+
+    spaced(d, (96, 470), "MYNDA LJÓSA  →  SHUTTERPLATE  ·  NORDLYS", mono(17), PLUM, spacing=2.4)
 
     # three frame previews on the right
     def preview(x: int, y: int, w: int, h: int, bg: str, cells: list, border: str | None = None, perf: bool = False):

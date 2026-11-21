@@ -1,7 +1,7 @@
 import { Icon } from './Icons';
 import { Drawer } from './Drawer';
 import { useI18n } from '../i18n';
-import type { ShutterFrameSpec, FrameSlot } from '../spec/shutterframe';
+import { sf, type ShutterFrameSpec, type FrameSlot, type LayerRef, type LayerRow } from '../spec/shutterframe';
 import { PRESETS } from '../editor/presets';
 import type { Selection } from '../editor/selection';
 
@@ -31,11 +31,11 @@ export interface LeftDrawerProps {
   onNew: () => void;
   onDuplicate: () => void;
   onDeleteLibrary: (id: string) => void;
-  onToggleText: (id: string) => void;
-  onMoveText: (id: string, delta: number) => void;
+  onToggleVisible: (ref: LayerRef) => void;
+  onLayerZ: (ref: LayerRef, dir: 1 | -1) => void;
   onToggleOverlay: () => void;
-  onToggleEmblem: () => void;
   onRemoveOverlay: () => void;
+  onBackground: () => void;
 }
 
 /** Presets and the saved shelf on the left of the canvas, layers on its other tab. */
@@ -128,34 +128,97 @@ function PresetsPanel(props: LeftDrawerProps) {
   );
 }
 
+/** One stack for slots, stickers, sprites, texts and the emblem — top first. */
 function LayersPanel(props: LeftDrawerProps) {
   const { t } = useI18n();
   const { spec, selection } = props;
-  const total = spec.cells.length + spec.texts.length + 2;
+  const rows = sf().layers(spec).filter((row) => row.kind !== 'overlay').slice().reverse();
+  const currentKey = selection
+    ? selection.kind === 'cell' ? `cell:${selection.index}`
+      : selection.kind === 'text' ? `text:${selection.id}`
+        : selection.kind === 'sticker' ? `sticker:${selection.id}`
+          : selection.kind === 'emblem' ? 'emblem' : ''
+    : '';
+
+  const refOf = (key: string): LayerRef | null => {
+    if (key.indexOf('cell:') === 0) return { kind: 'cell', index: Number(key.slice(5)) };
+    if (key.indexOf('text:') === 0) return { kind: 'text', id: key.slice(5) };
+    if (key.indexOf('sticker:') === 0) return { kind: 'sticker', id: key.slice(8) };
+    if (key === 'emblem') return { kind: 'emblem' };
+    return null;
+  };
+
+  const nameOf = (row: LayerRow): { title: string; sub: string } => {
+    if (row.kind === 'cell') return { title: t('layers.slot', { n: (row.index ?? 0) + 1 }), sub: props.slotNames[row.index ?? 0] ?? t('layers.slotEmpty') };
+    if (row.kind === 'text') {
+      const item = spec.texts.find((text) => text.id === row.id);
+      return { title: item?.text || t('layers.textEmpty'), sub: `${item?.family ?? 'sans'} · ${Math.round(item?.size ?? 0)}px` };
+    }
+    if (row.kind === 'sticker') {
+      const item = (spec.stickers ?? []).find((sticker) => sticker.id === row.id);
+      return { title: item?.label || t('layers.sticker'), sub: item?.kind === 'sprite' ? t('layers.sprite') : t('layers.stripe') };
+    }
+    return { title: t('layers.emblem'), sub: `${spec.emblem.mode} · ${spec.emblem.align}` };
+  };
+
   return (
     <section className="rail-section grow">
-      <h3 className="rail-title">{t('layers.title')} <small>{t('layers.meta', { n: total })}</small></h3>
+      <h3 className="rail-title">{t('layers.title')} <small>{t('layers.meta', { n: rows.length })}</small></h3>
       <ul className="layer-list">
-        {spec.cells.map((_cell, index) => (
-          <li key={`cell-${index}`}>
-            <button
-              type="button"
-              className={`layer-row${selection?.kind === 'cell' && selection.index === index ? ' active' : ''}`}
-              onClick={() => props.onSelect({ kind: 'cell', index })}
-            >
-              <span className="layer-num">{(index + 1).toString().padStart(2, '0')}</span>
-              <span className="layer-thumb">
-                {props.slots[index]?.img
-                  ? <LayerThumb slot={props.slots[index]} />
-                  : <Icon name="image" size={13} />}
-              </span>
-              <span className="layer-name">
-                {t('layers.slot', { n: index + 1 })}
-                <small>{props.slotNames[index] ?? t('layers.slotEmpty')}</small>
-              </span>
-            </button>
-          </li>
-        ))}
+        {rows.map((row) => {
+          const ref = refOf(row.key);
+          const named = nameOf(row);
+          const isActive = row.key === currentKey;
+          return (
+            <li key={row.key} className={isActive ? 'on' : undefined}>
+              <button
+                type="button"
+                className={`layer-row${isActive ? ' active' : ''}${row.visible ? '' : ' hidden'}`}
+                onClick={() => {
+                  if (row.kind === 'cell') props.onSelect({ kind: 'cell', index: row.index ?? 0 });
+                  else if (row.kind === 'text') props.onSelect({ kind: 'text', id: row.id ?? '' });
+                  else if (row.kind === 'sticker') props.onSelect({ kind: 'sticker', id: row.id ?? '' });
+                  else props.onSelect({ kind: 'emblem' });
+                }}
+              >
+                <span className="layer-num">
+                  {row.kind === 'cell' ? String((row.index ?? 0) + 1).padStart(2, '0')
+                    : row.kind === 'text' ? 'T' : row.kind === 'sticker' ? 'S' : 'HD'}
+                </span>
+                <span className="layer-thumb">
+                  {row.kind === 'cell' && props.slots[row.index ?? 0]?.img
+                    ? <LayerThumb slot={props.slots[row.index ?? 0]} />
+                    : <Icon name={row.kind === 'sticker' ? 'sticker' : row.kind === 'cell' ? 'image' : 'spark'} size={13} />}
+                </span>
+                <span className="layer-name">
+                  {named.title}
+                  <small>{named.sub}</small>
+                </span>
+              </button>
+              {ref && (
+                <>
+                  <button
+                    type="button"
+                    className="icon-btn tiny eye"
+                    aria-label={t('layers.visibility', { name: named.title })}
+                    title={t('layers.visibility', { name: named.title })}
+                    onClick={() => props.onToggleVisible(ref)}
+                  >
+                    <Icon name={row.visible ? 'eye' : 'eyeOff'} size={13} />
+                  </button>
+                  <span className="order-pair">
+                    <button type="button" className="icon-btn tiny" aria-label={t('layers.forward', { name: named.title })} title={t('layers.forward', { name: named.title })} onClick={() => props.onLayerZ(ref, 1)}>
+                      <Icon name="up" size={12} />
+                    </button>
+                    <button type="button" className="icon-btn tiny" aria-label={t('layers.backward', { name: named.title })} title={t('layers.backward', { name: named.title })} onClick={() => props.onLayerZ(ref, -1)}>
+                      <Icon name="down" size={12} />
+                    </button>
+                  </span>
+                </>
+              )}
+            </li>
+          );
+        })}
         {spec.overlay && (
           <li>
             <button
@@ -184,60 +247,17 @@ function LayersPanel(props: LeftDrawerProps) {
             </button>
           </li>
         )}
-        {spec.texts.map((item, index) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              className={`layer-row${selection?.kind === 'text' && selection.id === item.id ? ' active' : ''}`}
-              onClick={() => props.onSelect({ kind: 'text', id: item.id })}
-            >
-              <span className="layer-num">T{(index + 1).toString().padStart(2, '0')}</span>
-              <span className="layer-thumb"><Icon name="spark" size={13} /></span>
-              <span className="layer-name">
-                {item.text || t('layers.textEmpty')}
-                <small>{item.family} · {item.size}px</small>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="icon-btn tiny eye"
-              aria-label={t('layers.visibility', { name: item.text || t('layers.textEmpty') })}
-              title={t('layers.visibility', { name: item.text || t('layers.textEmpty') })}
-              onClick={() => props.onToggleText(item.id)}
-            >
-              <Icon name={item.visible === false ? 'eyeOff' : 'eye'} size={13} />
-            </button>
-            <span className="order-pair">
-              <button type="button" className="icon-btn tiny" aria-label={t('layers.forward', { name: item.text || t('layers.textEmpty') })} title={t('layers.forward', { name: item.text || t('layers.textEmpty') })} onClick={() => props.onMoveText(item.id, -1)}>
-                <Icon name="up" size={12} />
-              </button>
-              <button type="button" className="icon-btn tiny" aria-label={t('layers.backward', { name: item.text || t('layers.textEmpty') })} title={t('layers.backward', { name: item.text || t('layers.textEmpty') })} onClick={() => props.onMoveText(item.id, 1)}>
-                <Icon name="down" size={12} />
-              </button>
-            </span>
-          </li>
-        ))}
-        <li>
-          <button
-            type="button"
-            className={`layer-row${selection?.kind === 'emblem' ? ' active' : ''}`}
-            onClick={() => props.onSelect({ kind: 'emblem' })}
-          >
-            <span className="layer-num">HD</span>
-            <span className="layer-thumb"><Icon name="spark" size={13} /></span>
-            <span className="layer-name">{t('layers.emblem')}<small>{spec.emblem.mode} · {spec.emblem.align}</small></span>
-          </button>
-          <button
-            type="button"
-            className="icon-btn tiny eye"
-            aria-label={t('layers.visibility', { name: t('layers.emblem') })}
-            title={t('layers.visibility', { name: t('layers.emblem') })}
-            onClick={props.onToggleEmblem}
-          >
-            <Icon name={spec.emblem.enabled ? 'eye' : 'eyeOff'} size={13} />
-          </button>
-        </li>
       </ul>
+      <button type="button" className={`layer-bg${spec.canvas.backgroundImage ? ' on' : ''}`} onClick={props.onBackground}>
+        <span className="layer-thumb">
+          {spec.canvas.backgroundImage ? <img src={spec.canvas.backgroundImage.dataUrl} alt="" /> : <Icon name="image" size={13} />}
+        </span>
+        <span className="layer-name">
+          {t('layers.background')}
+          <small>{spec.canvas.backgroundImage ? t('layers.backgroundOn') : t('layers.backgroundOff')}</small>
+        </span>
+        <Icon name="crop" size={14} />
+      </button>
     </section>
   );
 }
