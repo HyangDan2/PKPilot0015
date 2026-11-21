@@ -1,0 +1,36 @@
+{
+  "name": "Mynda Ljósa — HD2Lab Frame Studio",
+  "short_name": "Mynda Ljósa",
+  "description": "HD2Lab의 커스텀 4컷 프레임 스튜디오. Shutterplate와 Nordlys가 읽는 .shutterframe.json을 브라우저에서 디자인합니다.",
+  "lang": "ko",
+  "start_url": "/PKPilot0015/",
+  "scope": "/PKPilot0015/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F7F4FD",
+  "theme_color": "#7C5CD6",
+  "categories": [
+    "photo",
+    "design",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

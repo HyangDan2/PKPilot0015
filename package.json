@@ -1,0 +1,30 @@
+{
+  "name": "pkpilot0015",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "HD2Lab Mynda Ljósa — Visual custom 4-cut frame studio for Shutterplate & Nordlys, 100% in-browser",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "brand": "python3 tools/generate_brand_assets.py"
+  },
+  "dependencies": {
+    "lz-string": "1.5.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "happy-dom": "^21.0.4",
+    "typescript": "^5.7.3",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.5"
+  }
+}
