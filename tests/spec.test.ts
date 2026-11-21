@@ -150,3 +150,12 @@ describe('layout', () => {
     expect(SF.summary(spec)).toBe('600×1800 · 4컷 · 1텍스트');
   });
 });
+
+describe('printed rows', () => {
+  it('drops the separator a missing value would leave', () => {
+    const vars = { camera: 'SONY ILCE-7M4', film: 'VESTRA', shutter: '', aperture: '', iso: '100' };
+    expect(SF.applyVars('{{camera}} · {{shutter}} · f/{{aperture}}', vars)).toBe('SONY ILCE-7M4');
+    expect(SF.applyVars('{{film}} · ISO {{iso}}', vars)).toBe('VESTRA · ISO 100');
+    expect(SF.applyVars('{{camera}} · {{lens}} · {{shutter}}', { camera: 'Canon', shutter: '1/125s' })).toBe('Canon · 1/125s');
+  });
+});

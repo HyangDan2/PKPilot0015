@@ -278,12 +278,28 @@
     };
   }
 
+  /* A printed row reads as a list — "camera · lens · shutter". A missing value
+     must not leave "· ·" behind, or a naked "f/" where the number should be. */
+  function tidyList(line) {
+    if (line.indexOf('·') < 0) return line.replace(/\s{2,}/g, ' ').trim();
+    var parts = line.split('·');
+    var kept = [];
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i].trim();
+      if (!part) continue;
+      if (/^(f\/|ISO|\u0192\/)$/i.test(part)) continue;
+      kept.push(part);
+    }
+    return kept.join(' · ');
+  }
+
   function applyVars(text, vars) {
     var src = str(text, '');
-    return src.replace(/\{\{\s*([a-z]+)\s*\}\}/gi, function (whole, name) {
+    var out = src.replace(/\{\{\s*([a-z]+)\s*\}\}/gi, function (whole, name) {
       var key = String(name).toLowerCase();
       return Object.prototype.hasOwnProperty.call(vars || {}, key) ? String(vars[key]) : '';
     });
+    return tidyList(out);
   }
 
   /* ── painting ───────────────────────────────────────────────────────────── */
