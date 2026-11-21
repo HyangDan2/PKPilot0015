@@ -38,6 +38,7 @@ const PATHS: Record<string, string> = {
   sprite: 'M12 3l4 4-4 4-4-4z M6 13l3 3-3 3-3-3z M18 13l3 3-3 3-3-3z',
   crop: 'M6 2v16h16 M2 6h16v16',
   plusCircle: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18 M12 8v8 M8 12h8',
+  target: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18 M12 2v4 M12 18v4 M2 12h4 M18 12h4',
 };
 
 export function Icon({ name, size = 16, style }: { name: string; size?: number; style?: CSSProperties }) {
