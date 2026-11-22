@@ -36,6 +36,8 @@ const KO = {
   'dock.zoomFit': '맞춤',
   'dock.zoom50': '50%',
   'dock.zoom100': '100%',
+  'dock.zoomIn': '확대',
+  'dock.zoomOut': '축소',
   'dock.grid': '그리드',
   'dock.save': '저장',
   'dock.saveHint': '내 보관함 + .shutterframe.json',
@@ -140,7 +142,7 @@ const KO = {
   'props.layerBelow': '사진 아래',
 
   /* ── canvas ───────────────────────────────────────────────────────────── */
-  'stage.hint': '드래그로 이동 · 모서리로 크기 조절 · 슬롯을 두 번 탭해 사진 교체',
+  'stage.hint': '휠·핀치로 확대 · 빈 곳을 끌어 화면 이동 · 슬롯을 두 번 탭해 사진 교체',
   'stage.spec': '{w}×{h}px · {n}컷',
   'stage.canvasLabel': '프레임 캔버스',
 
@@ -310,6 +312,8 @@ const EN: Record<TKey, string> = {
   'dock.zoomFit': 'Fit',
   'dock.zoom50': '50%',
   'dock.zoom100': '100%',
+  'dock.zoomIn': 'Zoom in',
+  'dock.zoomOut': 'Zoom out',
   'dock.grid': 'Grid',
   'dock.save': 'Save',
   'dock.saveHint': 'My library + .shutterframe.json',
@@ -409,7 +413,7 @@ const EN: Record<TKey, string> = {
   'props.layerAbove': 'Above photos',
   'props.layerBelow': 'Below photos',
 
-  'stage.hint': 'Drag to move · corners to resize · double-tap a slot to swap the photo',
+  'stage.hint': 'Wheel or pinch to zoom · drag an empty spot to pan · double-tap a slot to swap its photo',
   'stage.spec': '{w}×{h}px · {n} cuts',
   'stage.canvasLabel': 'Frame canvas',
 

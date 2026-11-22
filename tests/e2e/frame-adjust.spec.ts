@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { test, expect, isMobile, openStudio } from './fixtures';
+import { test, expect, openStudio } from './fixtures';
 
 /**
  * A photograph chosen behind the plate, and the photographs in its slots, must
@@ -295,24 +295,27 @@ test.describe('a photograph survives the frame being adjusted', () => {
     expect((await stored(page))?.canvas.backgroundImage).toBeUndefined();
   });
 
-  test('the plate fills its stage on this screen', async ({ page }) => {
+  test('the plate opens in the clear part of its stage', async ({ page }) => {
     await openStudio(page);
     await page.waitForTimeout(400);
-    const [box, stage] = await Promise.all([
+    const [box, stage, capsule] = await Promise.all([
       plateBox(page),
-      page.locator('.stage-wrap').boundingBox(),
+      page.locator('canvas.stage-canvas').boundingBox(),
+      page.locator('.zoom-capsule').boundingBox(),
     ]);
-    if (!stage) throw new Error('no stage');
-    /* the plate is centred in the stage and fits inside it */
+    if (!stage || !capsule) throw new Error('no stage');
+    /* the viewport is the whole stage now: the plate fits it and is centred
+       across, while the floating dock's room is respected top and bottom */
     expect(box.w).toBeLessThanOrEqual(stage.width + 1);
     expect(box.h).toBeLessThanOrEqual(stage.height + 1);
     expect(Math.abs(box.x + box.w / 2 - (stage.x + stage.width / 2))).toBeLessThan(3);
-    expect(Math.abs(box.y + box.h / 2 - (stage.y + stage.height / 2))).toBeLessThan(3);
+    expect(box.y).toBeGreaterThan(stage.y + 20);
+    expect(box.y + box.h).toBeLessThanOrEqual(capsule.y + 1);
     /* and it uses the room it has: on a phone the 1:3 strip is height-bound */
     const readout = await page.locator('.zoom-readout').textContent();
     const shown = Number((readout ?? '0').replace('%', '')) / 100;
     const drawn = box.h / 1800;
     expect(Math.abs(shown - drawn)).toBeLessThan(0.02);
-    if (!isMobile(page)) expect(box.h).toBeGreaterThan(stage.height * 0.6);
+    expect(box.h).toBeGreaterThan(stage.height * 0.7);
   });
 });
