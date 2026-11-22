@@ -1,6 +1,6 @@
 {
-  "name": "Mynda Ljósa — HD2Lab Frame Studio",
-  "short_name": "Mynda Ljósa",
+  "name": "FrameBuilder — HD2Lab Frame Studio",
+  "short_name": "FrameBuilder",
   "description": "HD2Lab의 커스텀 4컷 프레임 스튜디오. Shutterplate와 Nordlys가 읽는 .shutterframe.json을 브라우저에서 디자인합니다.",
   "lang": "ko",
   "start_url": "/PKPilot0015/",

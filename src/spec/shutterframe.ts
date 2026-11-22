@@ -1,7 +1,7 @@
 /**
  * Typed face of the shared `public/shutterframe.js` engine. The engine itself is
  * one classic script the three apps load, so the spec, the validator, the
- * painter and the share codec can never drift between Mynda Ljósa,
+ * painter and the share codec can never drift between FrameBuilder,
  * Shutterplate and Nordlys.
  *
  * v1 documents written before the touch editor still load unchanged: `rotation`
@@ -78,6 +78,10 @@ export interface FrameText {
 
 export interface FrameEmblem {
   enabled: boolean;
+  /** Which maker's mark prints — `hd2lab` (the house dual-skew) by default. */
+  id?: string;
+  /** false prints each maker's own colour, true prints one ink (All Black). */
+  mono?: boolean;
   x: number;
   y: number;
   maxW: number;
@@ -86,6 +90,12 @@ export interface FrameEmblem {
   mode: 'auto' | 'light' | 'dark';
   rotation?: number;
   z?: number;
+}
+
+/** One entry of the emblem catalogue the engine draws with Path2D. */
+export interface EmblemInfo {
+  id: string;
+  name: string;
 }
 
 export type StickerKind = 'stripe' | 'sprite';
@@ -250,8 +260,12 @@ interface ShutterFrameApi {
   alignLayer(spec: ShutterFrameSpec, ref: LayerRef, mode: AlignMode, box?: LayerBounds): ShutterFrameSpec;
   translate(spec: ShutterFrameSpec, ref: LayerRef, dx: number, dy: number): ShutterFrameSpec;
   resetLayers(spec: ShutterFrameSpec): ShutterFrameSpec;
+  emblemList(): EmblemInfo[];
+  emblemOf(id: string): { id: string; name: string; vb: [number, number] };
+  emblemBox(emblem: FrameEmblem): { x: number; y: number; w: number; h: number };
   addSticker(spec: ShutterFrameSpec, preset: string, patch?: Partial<FrameSticker>): ShutterFrameSpec;
   addSprite(spec: ShutterFrameSpec, dataUrl: string, patch?: Partial<FrameSticker>): ShutterFrameSpec;
+  addEmblem(spec: ShutterFrameSpec, patch?: Partial<FrameEmblem>): ShutterFrameSpec;
   removeLayer(spec: ShutterFrameSpec, ref: LayerRef): ShutterFrameSpec;
   alignCells(spec: ShutterFrameSpec, kind: '1x4' | '2x2', margin?: number, gutter?: number): ShutterFrameSpec;
   summary(spec: ShutterFrameSpec): string;

@@ -159,3 +159,63 @@ describe('printed rows', () => {
     expect(SF.applyVars('{{camera}} · {{lens}} · {{shutter}}', { camera: 'Canon', shutter: '1/125s' })).toBe('Canon · 1/125s');
   });
 });
+
+describe('maker emblems', () => {
+  it('catalogues the ten makers and the HD2Lab house mark', () => {
+    const list = SF.emblemList();
+    expect(list.map((item: any) => item.id)).toEqual([
+      'sony', 'canon', 'nikon', 'fujifilm', 'samsung', 'leica',
+      'hasselblad', 'apple', 'lumix', 'omsystem', 'hd2lab',
+    ]);
+    expect(list.find((item: any) => item.id === 'hd2lab').name).toBe('HD2Lab');
+  });
+
+  it('reads a mark id and the colour mode, and falls back to the house mark', () => {
+    const canon = SF.validate({ ...sample(), emblem: { ...sample().emblem, id: 'canon', mono: true } }).spec;
+    expect(canon.emblem).toMatchObject({ id: 'canon', mono: true, enabled: true });
+
+    const unknown = SF.validate({ ...sample(), emblem: { ...sample().emblem, id: 'not-a-maker' } }).spec;
+    expect(unknown.emblem.id).toBe('hd2lab');
+
+    /* a document written before the logo layer existed keeps printing as it did */
+    const legacy = SF.validate({ ...sample(), emblem: { enabled: true, x: 300, y: 1700, maxW: 220, maxH: 40, align: 'center', mode: 'auto' } }).spec;
+    expect(legacy.emblem).toMatchObject({ id: 'hd2lab', mono: false });
+  });
+
+  it('keeps every mark its own ratio inside the emblem box', () => {
+    const base = { enabled: true, x: 300, y: 1700, align: 'center' as const, mode: 'auto' as const };
+    const wordmark = SF.emblemBox({ ...base, id: 'hasselblad', maxW: 240, maxH: 64 });
+    const glyph = SF.emblemBox({ ...base, id: 'apple', maxW: 240, maxH: 64 });
+    /* the Hasselblad wordmark is 12.8× its height; Apple's glyph is near-square */
+    expect(wordmark.w).toBeCloseTo(240, 3);
+    expect(wordmark.h).toBeCloseTo(240 / (1276.56 / 100), 2);
+    expect(glyph.h).toBeCloseTo(64, 3);
+    expect(glyph.w).toBeCloseTo(64 * (81.42 / 100), 2);
+    expect(wordmark.h).toBeLessThan(glyph.h);
+  });
+
+  it('is a layer while it prints, and is gone from the stack when deleted', () => {
+    const spec = SF.validate(sample()).spec;
+    expect(SF.layers(spec).some((row: any) => row.key === 'emblem')).toBe(true);
+    expect(SF.boundsOf(spec, { kind: 'emblem' })).not.toBeNull();
+
+    const off = SF.removeLayer(spec, { kind: 'emblem' });
+    expect(off.emblem.enabled).toBe(false);
+    expect(SF.layers(off).some((row: any) => row.key === 'emblem')).toBe(false);
+    expect(SF.boundsOf(off, { kind: 'emblem' })).toBeNull();
+
+    const back = SF.addEmblem(off, { id: 'leica' });
+    expect(back.emblem).toMatchObject({ enabled: true, id: 'leica' });
+    expect(SF.layers(back).some((row: any) => row.key === 'emblem')).toBe(true);
+    expect(SF.boundsOf(back, { kind: 'emblem' })).not.toBeNull();
+  });
+
+  it('hits the logo where it is drawn, not where an old estimate sat', () => {
+    const spec = SF.validate(sample()).spec;
+    const box = SF.boundsOf(spec, { kind: 'emblem' });
+    expect(box.cx).toBeCloseTo(spec.emblem.x, 1);
+    expect(box.cy).toBeCloseTo(spec.emblem.y, 1);
+    expect(SF.hitLayer(spec, { kind: 'emblem' }, { x: spec.emblem.x, y: spec.emblem.y })).toBe(true);
+    expect(SF.hitLayer(spec, { kind: 'emblem' }, { x: spec.emblem.x, y: spec.emblem.y - 200 })).toBe(false);
+  });
+});

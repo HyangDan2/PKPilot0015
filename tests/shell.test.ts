@@ -48,6 +48,40 @@ describe('HD2Lab shell', () => {
     expect(html).toContain('/PKPilot0015/shutterframe.js');
   });
 
+  it('calls itself FrameBuilder everywhere a link or a tab shows it', () => {
+    expect(html).not.toContain('Mynda Ljósa');
+    expect(html).toMatch(/<title>FrameBuilder — HD2Lab/);
+    expect(html).toMatch(/property="og:title" content="FrameBuilder/);
+    expect(html).toMatch(/name="twitter:title" content="FrameBuilder/);
+    expect(html).toMatch(/property="og:description" content="[^"]*FrameBuilder|property="og:description" content="사진 네 장/);
+    expect(html).toContain('og-image.png?v=20261122-rename');
+    expect(html).toContain('social-preview.png?v=20261122-rename');
+
+    const manifest = JSON.parse(read('public/manifest.json'));
+    expect(manifest.name).toContain('FrameBuilder');
+    expect(manifest.short_name).toBe('FrameBuilder');
+
+    const pkg = JSON.parse(read('package.json'));
+    expect(pkg.description).toContain('FrameBuilder');
+
+    const readme = read('README.md');
+    expect(readme).toContain('FrameBuilder');
+    expect(readme).not.toContain('Mynda Ljósa');
+  });
+
+  it('carries the logo marks as canvas artwork, not as images', () => {
+    const engine = read('public/shutterframe.js');
+    expect(engine).toContain("id: 'hd2lab'");
+    expect(engine).toContain('M15 20L35 10V43L15 53Z');
+    expect(engine).toContain('M29 24L49 14V47L29 57Z');
+    expect(engine).toContain('new Path2D(');
+    for (const maker of ['sony', 'canon', 'nikon', 'fujifilm', 'samsung', 'leica', 'hasselblad', 'apple', 'lumix', 'omsystem']) {
+      expect(engine).toContain(`id: '${maker}'`);
+    }
+    /* not a single <img> or fetched svg draws the emblem */
+    expect(engine).not.toContain('emblem.svg');
+  });
+
   it('publishes the navy shell colour in the manifest', () => {
     const manifest = JSON.parse(read('public/manifest.json'));
     expect(manifest.theme_color).toBe('#0B1020');

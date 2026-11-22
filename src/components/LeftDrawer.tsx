@@ -33,6 +33,8 @@ export interface LeftDrawerProps {
   onDeleteLibrary: (id: string) => void;
   onToggleVisible: (ref: LayerRef) => void;
   onLayerZ: (ref: LayerRef, dir: 1 | -1) => void;
+  onAddEmblem: () => void;
+  onRemoveEmblem: () => void;
   onToggleOverlay: () => void;
   onRemoveOverlay: () => void;
   onBackground: () => void;
@@ -158,7 +160,8 @@ function LayersPanel(props: LeftDrawerProps) {
       const item = (spec.stickers ?? []).find((sticker) => sticker.id === row.id);
       return { title: item?.label || t('layers.sticker'), sub: item?.kind === 'sprite' ? t('layers.sprite') : t('layers.stripe') };
     }
-    return { title: t('layers.emblem'), sub: `${spec.emblem.mode} · ${spec.emblem.align}` };
+    const mark = sf().emblemOf(spec.emblem.id ?? 'hd2lab');
+    return { title: t('layers.emblem'), sub: `${mark.name} · ${spec.emblem.mono ? 'ink' : 'brand'}` };
   };
 
   return (
@@ -197,15 +200,30 @@ function LayersPanel(props: LeftDrawerProps) {
               </button>
               {ref && (
                 <>
-                  <button
-                    type="button"
-                    className="icon-btn tiny eye"
-                    aria-label={t('layers.visibility', { name: named.title })}
-                    title={t('layers.visibility', { name: named.title })}
-                    onClick={() => props.onToggleVisible(ref)}
-                  >
-                    <Icon name={row.visible ? 'eye' : 'eyeOff'} size={13} />
-                  </button>
+                  {row.kind === 'emblem' ? (
+                    /* a logo is either on the plate or gone from the stack, so
+                       its trash is the whole switch — no half-hidden state */
+                    <button
+                      type="button"
+                      className="icon-btn tiny"
+                      data-testid="layer-emblem-remove"
+                      aria-label={t('layers.emblemRemove')}
+                      title={t('layers.emblemRemove')}
+                      onClick={props.onRemoveEmblem}
+                    >
+                      <Icon name="trash" size={13} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="icon-btn tiny eye"
+                      aria-label={t('layers.visibility', { name: named.title })}
+                      title={t('layers.visibility', { name: named.title })}
+                      onClick={() => props.onToggleVisible(ref)}
+                    >
+                      <Icon name={row.visible ? 'eye' : 'eyeOff'} size={13} />
+                    </button>
+                  )}
                   <span className="order-pair">
                     <button type="button" className="icon-btn tiny" aria-label={t('layers.forward', { name: named.title })} title={t('layers.forward', { name: named.title })} onClick={() => props.onLayerZ(ref, 1)}>
                       <Icon name="up" size={12} />
@@ -248,6 +266,16 @@ function LayersPanel(props: LeftDrawerProps) {
           </li>
         )}
       </ul>
+      {spec.emblem.enabled === false && (
+        <button type="button" className="layer-bg" data-testid="layers-emblem-add" onClick={props.onAddEmblem}>
+          <span className="layer-thumb"><Icon name="plus" size={13} /></span>
+          <span className="layer-name">
+            {t('layers.emblemAdd')}
+            <small>{t('props.emblemTypeHint')}</small>
+          </span>
+          <Icon name="spark" size={14} />
+        </button>
+      )}
       <button type="button" className={`layer-bg${spec.canvas.backgroundImage ? ' on' : ''}`} onClick={props.onBackground}>
         <span className="layer-thumb">
           {spec.canvas.backgroundImage ? <img src={spec.canvas.backgroundImage.dataUrl} alt="" /> : <Icon name="image" size={13} />}
