@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-PKPilot0015 · Mynda Ljósa — HD2Lab brand asset generator (Soft Iris)
+PKPilot0015 · FrameBuilder — HD2Lab brand asset generator (Soft Iris)
 ====================================================================
-Produces the official HD2Lab asset set for Mynda Ljósa out of the same
-dual-skew mark the app header draws:
+Produces the official HD2Lab asset set for FrameBuilder out of the same
+dual-skew mark Web-HQ, Sigrún and Lýra draw:
 
     favicon.svg, favicon.ico (16/32/48), favicon-32x32.png,
     apple-touch-icon.png (180), icon-192.png, icon-512.png,
@@ -16,6 +16,7 @@ dual-skew mark the app header draws:
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 
@@ -95,23 +96,95 @@ def gradient(size: int) -> Image.Image:
     return img
 
 
+# ── the official HD2Lab mark ────────────────────────────────────────────────
+# The same dual-skew geometry Web-HQ, PKPilot0018 (Sigrún) and PKPilot0019
+# (Lýra) draw: two sheared frames (vertical sides, 26.57° rise on the top and
+# bottom edges) crossing each other, the front frame offset right and down.
+# The header, favicon set and PWA icons all read from `mark_paths()`, so no
+# surface can drift back to the old gradient tile.
+MARK_ANG = 0.5            # tan of the rise of the top/bottom edges
+MARK_W, MARK_H, MARK_T = 20.0, 32.8, 4.0
+MARK_DX, MARK_DY = 14.0, 11.1
+MARK_CENTRE = (32.0, 33.4)
+ICON_BG = "#FAFAFD"
+ICON_BORDER = "#E8E4F2"
+ICON_INK = "#8B6CE8"
+
+
+def _offset(poly, d: float):
+    """Offset a convex polygon by d (positive = outward) with miter joins."""
+    n = len(poly)
+    area = 0.0
+    for i in range(n):
+        x0, y0 = poly[i]
+        x1, y1 = poly[(i + 1) % n]
+        area += x0 * y1 - x1 * y0
+    sign = 1.0 if area > 0 else -1.0
+    lines = []
+    for i in range(n):
+        x0, y0 = poly[i]
+        x1, y1 = poly[(i + 1) % n]
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        nx, ny = sign * dy / length, -sign * dx / length
+        lines.append((nx, ny, nx * x0 + ny * y0 + d))
+    out = []
+    for i in range(n):
+        a1, b1, c1 = lines[i - 1]
+        a2, b2, c2 = lines[i]
+        det = a1 * b2 - a2 * b1
+        out.append(((c1 * b2 - c2 * b1) / det, (a1 * c2 - a2 * c1) / det))
+    return out
+
+
+def _frame(x: float, ytop: float):
+    rect = [(x, ytop), (x + MARK_W, ytop), (x + MARK_W, ytop + MARK_H), (x, ytop + MARK_H)]
+    sheared = [(px, py - MARK_ANG * px) for px, py in rect]
+    return _offset(sheared, MARK_T / 2), _offset(sheared, -MARK_T / 2)
+
+
+def geometry():
+    """Both frame rings, centred in the 64-unit viewBox."""
+    o1, i1 = _frame(0.0, 0.0)
+    o2, i2 = _frame(MARK_DX, MARK_DY)
+    xs = [p[0] for p in o1 + o2]
+    ys = [p[1] for p in o1 + o2]
+    ox = MARK_CENTRE[0] - (min(xs) + max(xs)) / 2
+    oy = MARK_CENTRE[1] - (min(ys) + max(ys)) / 2
+    shift = lambda poly: [(x + ox, y + oy) for x, y in poly]  # noqa: E731
+    return shift(o1), shift(i1), shift(o2), shift(i2)
+
+
+def _path(outer, inner) -> str:
+    pts = lambda poly: "M" + "L".join(f"{x:.3f} {y:.3f}" for x, y in poly) + "Z"  # noqa: E731
+    return pts(outer) + pts(inner)
+
+
+def mark_paths() -> tuple[str, str]:
+    o1, i1, o2, i2 = geometry()
+    return _path(o1, i1), _path(o2, i2)
+
+
 def mark(size: int) -> Image.Image:
-    """Rounded gradient tile with the two skewed bars of the HD2Lab mark."""
-    scale = 4
-    big = size * scale
-    tile = gradient(big)
-    mask = Image.new("L", (big, big), 0)
-    ImageDraw.Draw(mask).rounded_rectangle([0, 0, big - 1, big - 1], radius=int(big * 0.28), fill=255)
-    tile.putalpha(mask)
-    d = ImageDraw.Draw(tile)
-    w = int(big * 0.085)
-    for x0, alpha in ((0.34, 255), (0.525, 150)):
-        x = big * x0
-        d.line(
-            [(x + big * 0.075, big * 0.27), (x - big * 0.035, big * 0.73)],
-            fill=(255, 255, 255, alpha), width=w,
-        )
-    return tile.resize((size, size), Image.LANCZOS)
+    """Rounded card carrying the official dual-skew mark, at `size` px."""
+    ss = 8 if size <= 64 else 4
+    big = size * ss
+    u = big / 64.0
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(
+        [0, 0, big - 1, big - 1], radius=12 * u, fill=ICON_BG, outline=ICON_BORDER,
+        width=max(1, round(2 * u)),
+    )
+    o1, i1, o2, i2 = geometry()
+    ink = Image.new("RGBA", (big, big), ICON_INK)
+    for outer, inner in ((o1, i1), (o2, i2)):
+        ring = Image.new("L", (big, big), 0)
+        rd = ImageDraw.Draw(ring)
+        rd.polygon([(x * u, y * u) for x, y in outer], fill=255)
+        rd.polygon([(x * u, y * u) for x, y in inner], fill=0)
+        img.paste(ink, (0, 0), ring)
+    return img.resize((size, size), Image.LANCZOS)
 
 
 def write_icon(path: str, size: int):
@@ -119,18 +192,14 @@ def write_icon(path: str, size: int):
 
 
 def build_favicon_svg(path: str):
-    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HD2Lab Mynda Ljósa">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#7C5CD6"/>
-      <stop offset="1" stop-color="#C9A6E8"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="18" fill="url(#g)"/>
-  <path d="M26 46 L34 18" stroke="#ffffff" stroke-width="5.4" stroke-linecap="round"/>
-  <path d="M38 46 L46 18" stroke="#ffffff" stroke-width="5.4" stroke-linecap="round" opacity="0.6"/>
-</svg>
-"""
+    first, second = mark_paths()
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HD2Lab FrameBuilder">'
+        f'<rect width="64" height="64" rx="12" fill="{ICON_BG}" stroke="{ICON_BORDER}" stroke-width="2"/>'
+        f'<path fill="{ICON_INK}" fill-rule="evenodd" d="{first}"/>'
+        f'<path fill="{ICON_INK}" fill-rule="evenodd" d="{second}"/>'
+        "</svg>\n"
+    )
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(svg)
 
@@ -171,7 +240,7 @@ def build_og(path: str):
     spaced(d, (W - 96, 126), "LOCAL ONLY · 0 B UPLOAD", mono(14), MUTED, spacing=2.2, anchor="r")
 
     # title
-    d.text((96, 250), "Mynda Ljósa", font=font(78), fill=INK)
+    d.text((96, 250), "FrameBuilder", font=font(78), fill=INK)
     d.text((96, 350), "커스텀 4컷 프레임 스튜디오", font=font(36), fill=ACCENT)
 
     # the caption wraps inside the card, left of the preview strips
@@ -180,14 +249,14 @@ def build_og(path: str):
     caption_right = 720
     lines = wrap_lines(
         d,
-        "사진 네 장을 한 장으로. 브라우저에서 디자인하고 Shutterplate · Nordlys에서 그대로 인화합니다.",
+        "사진 네 장을 한 장으로. 매트 코튼 종이 위에 디자인하고 Shutterplate · CinePlate에서 그대로 인화합니다.",
         caption_font,
         caption_right - caption_left,
     )
     for index, line in enumerate(lines[:2]):
         d.text((caption_left, 404 + index * 30), line, font=caption_font, fill=MUTED)
 
-    spaced(d, (96, 470), "MYNDA LJÓSA  →  SHUTTERPLATE  ·  NORDLYS", mono(17), PLUM, spacing=2.4)
+    spaced(d, (96, 470), "FRAMEBUILDER  →  SHUTTERPLATE  ·  CINEPLATE", mono(17), PLUM, spacing=2.4)
 
     # three frame previews on the right
     def preview(x: int, y: int, w: int, h: int, bg: str, cells: list, border: str | None = None, perf: bool = False):
@@ -245,16 +314,16 @@ def main():
     build_og(os.path.join(OUT, "social-preview.png"))
 
     manifest = {
-        "name": "Mynda Ljósa — HD2Lab Frame Studio",
-        "short_name": "Mynda Ljósa",
-        "description": "HD2Lab의 커스텀 4컷 프레임 스튜디오. Shutterplate와 Nordlys가 읽는 .shutterframe.json을 브라우저에서 디자인합니다.",
+        "name": "FrameBuilder — HD2Lab Frame Studio",
+        "short_name": "FrameBuilder",
+        "description": "HD2Lab의 커스텀 4컷 프레임 스튜디오. Shutterplate와 CinePlate가 읽는 .shutterframe.json을 브라우저에서 디자인합니다.",
         "lang": "ko",
         "start_url": "/PKPilot0015/",
         "scope": "/PKPilot0015/",
         "display": "standalone",
         "orientation": "any",
-        "background_color": "#F7F4FD",
-        "theme_color": "#7C5CD6",
+        "background_color": "#0B1020",
+        "theme_color": "#0B1020",
         "categories": ["photo", "design", "productivity"],
         "icons": [
             {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},

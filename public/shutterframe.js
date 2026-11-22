@@ -1,8 +1,8 @@
 /*!
  * HD2Lab ShutterFrame v1 — the shared custom 4-cut frame engine.
  *
- * One plain script, loaded as a classic <script> by Mynda Ljósa (PKPilot0015),
- * Shutterplate (PKPilot0003) and Nordlys (PKPilot0011), so all three read the
+ * One plain script, loaded as a classic <script> by FrameBuilder (PKPilot0015),
+ * Shutterplate (PKPilot0003) and CinePlate (PKPilot0011), so all three read the
  * same `.shutterframe.json` byte for byte: one validator, one painter, one
  * lz-string share codec and one IndexedDB shelf.
  *
@@ -16,6 +16,7 @@
  * keeps its exact printed order, and the same document may now also carry:
  *
  *   canvas.backgroundImage  { dataUrl, opacity }      a cropped photograph
+ *   canvas.texture          { kind, strength }         matte cotton / archival grain
  *   cells[].rotation / .z   texts[].rotation / .z     emblem.rotation / .z
  *   stickers[]              transparent stripe stickers and uploaded sprites
  *
@@ -674,6 +675,18 @@
   }
 
   /**
+   * The paper a frame is printed on: a matte cotton rag or archival stock,
+   * with a strength the visitor can soften or switch off. A document written
+   * before paper existed prints on matte cotton, so a frame opened in either
+   * host app looks exactly like the one on this screen.
+   */
+  function normalizeTexture(raw) {
+    var t = raw && typeof raw === 'object' ? raw : {};
+    var kind = t.kind === 'none' ? 'none' : (t.kind === 'archive' ? 'archive' : 'cotton');
+    return { kind: kind, strength: Math.round(clamp(num(t.strength, 0.55), 0, 1) * 100) / 100 };
+  }
+
+  /**
    * Reads any candidate document into the one canonical v1 shape. Unknown keys
    * are dropped and every value lands in range, so a frame an app receives is
    * always paintable — an invalid document still returns its errors.
@@ -736,6 +749,7 @@
         background: color(cv.background, '#f4f1ea'),
         gradient: gradient || undefined,
         backgroundImage: normalizeBackgroundImage(cv.backgroundImage) || undefined,
+        texture: normalizeTexture(cv.texture),
         light: cv.light !== false
       },
       perforation: normalizePerforation(input.perforation, W, H),
@@ -1005,6 +1019,118 @@
       ctx.fillStyle = cv.background || '#f4f1ea';
     }
     ctx.fillRect(0, 0, W, H);
+  }
+
+  /*
+   * Paper. One 192-unit tile carries the tooth of the sheet — fine specks and
+   * short fibres, deterministic so the same frame always prints the same
+   * paper — and a soft vignette gives a matte sheet its heavier edges. The
+   * tile is cached per kind · strength · light so a repaint costs one fill.
+   */
+  var TEXTURE_TILES = {};
+
+  function textureTile(kind, strength, light) {
+    var key = kind + ':' + strength.toFixed(2) + ':' + (light ? 'l' : 'd');
+    if (TEXTURE_TILES[key] !== undefined) return TEXTURE_TILES[key];
+    if (typeof document === 'undefined' || !document.createElement) return (TEXTURE_TILES[key] = null);
+    var size = 192;
+    var canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    var g = canvas.getContext('2d');
+    if (!g) return (TEXTURE_TILES[key] = null);
+    var rand = seeded(kind === 'archive' ? 9137 : 4211);
+    var dark = 'rgba(38,31,22,';
+    var pale = light ? 'rgba(255,251,242,' : 'rgba(236,240,255,';
+    var fibre = kind === 'archive' ? 46 : 30;
+    var specks = kind === 'archive' ? 1250 : 820;
+    /* low-frequency mottling: the cloudy unevenness of a real sheet */
+    var clouds = kind === 'archive' ? 9 : 7;
+    for (var c = 0; c < clouds; c += 1) {
+      var cx = rand() * size;
+      var cy = rand() * size;
+      var cr = size * (0.2 + rand() * 0.34);
+      var cloud = g.createRadialGradient(cx, cy, 0, cx, cy, cr);
+      var tone = rand() < 0.5 ? dark : pale;
+      cloud.addColorStop(0, tone + (0.042 * strength).toFixed(3) + ')');
+      cloud.addColorStop(1, tone + '0)');
+      g.fillStyle = cloud;
+      g.fillRect(0, 0, size, size);
+    }
+    /* the tooth: grains a fingertip would feel, both inks on every paper */
+    for (var i = 0; i < specks; i += 1) {
+      var x = rand() * size;
+      var y = rand() * size;
+      var r = 0.4 + rand() * (kind === 'archive' ? 2.2 : 1.6);
+      var a = (0.35 + rand() * 0.65) * (kind === 'archive' ? 0.095 : 0.065) * strength;
+      g.fillStyle = (rand() < (light ? 0.58 : 0.42) ? dark : pale) + a.toFixed(3) + ')';
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    /* fibres: short hairs lying in a hundred directions */
+    g.lineCap = 'round';
+    for (var f = 0; f < fibre; f += 1) {
+      var fx = rand() * size;
+      var fy = rand() * size;
+      var len = 6 + rand() * (kind === 'archive' ? 26 : 16);
+      var ang = rand() * Math.PI * 2;
+      g.strokeStyle = (rand() < 0.5 ? dark : pale) + (0.05 * strength).toFixed(3) + ')';
+      g.lineWidth = 0.4 + rand() * 0.5;
+      g.beginPath();
+      g.moveTo(fx, fy);
+      g.quadraticCurveTo(
+        fx + Math.cos(ang) * len * 0.55 + (rand() - 0.5) * 4,
+        fy + Math.sin(ang) * len * 0.55 + (rand() - 0.5) * 4,
+        fx + Math.cos(ang) * len,
+        fy + Math.sin(ang) * len
+      );
+      g.stroke();
+    }
+    return (TEXTURE_TILES[key] = canvas);
+  }
+
+  /** Paints the sheet's grain over the colour or gradient, under the photos. */
+  function paintTexture(ctx, spec, W, H, s) {
+    var tx = spec.canvas && spec.canvas.texture;
+    if (!tx || tx.kind === 'none') return;
+    var strength = clamp(num(tx.strength, 0.55), 0, 1);
+    if (strength <= 0) return;
+    var tile = textureTile(tx.kind === 'archive' ? 'archive' : 'cotton', Math.round(strength * 20) / 20, spec.canvas.light !== false);
+    if (tile) {
+      var pattern = ctx.createPattern(tile, 'repeat');
+      if (pattern) {
+        /* the tile is measured in plate units, so it prints at the same grain
+           whether the plate is on screen at 40% or exported at 4× */
+        if (pattern.setTransform && typeof DOMMatrix === 'function' && s > 0) {
+          try { pattern.setTransform(new DOMMatrix([s, 0, 0, s, 0, 0])); } catch (e) { /* old engines */ }
+        }
+        ctx.save();
+        ctx.fillStyle = pattern;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+    }
+    /* a sheet is never one tone: two wide, soft washes keep the paper from
+       reading as a flat fill even when the whole plate is fitted to a phone */
+    var sheet = 'rgba(' + (spec.canvas.light === false ? '255,255,255,' : '58,46,28,') + (0.028 * strength).toFixed(3) + ')';
+    [[0.3, 0.22, 0.62], [0.74, 0.78, 0.55]].forEach(function (spot) {
+      var wash = ctx.createRadialGradient(W * spot[0], H * spot[1], 0, W * spot[0], H * spot[1], Math.max(W, H) * spot[2]);
+      wash.addColorStop(0, sheet);
+      wash.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.save();
+      ctx.fillStyle = wash;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    });
+    var soft = 0.05 * strength;
+    var vignette = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.22, W / 2, H / 2, Math.max(W, H) * 0.74);
+    vignette.addColorStop(0, 'rgba(0,0,0,0)');
+    vignette.addColorStop(1, spec.canvas.light === false ? 'rgba(255,255,255,' + soft.toFixed(3) + ')' : 'rgba(0,0,0,' + soft.toFixed(3) + ')');
+    ctx.save();
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
   }
 
   /** A photograph chosen in the editor, cropped to the plate by the browser. */
@@ -1464,6 +1590,7 @@
     ctx.rect(0, 0, W, H);
     ctx.clip();
     fillBackground(ctx, spec, W, H);
+    guard(function () { paintTexture(ctx, spec, W, H, s); });
     /* one unreadable asset must never cost the rest of the plate */
     guard(function () { drawBackgroundImage(ctx, spec, W, H); });
     guard(function () { drawOverlay(ctx, spec, W, H, 'below'); });

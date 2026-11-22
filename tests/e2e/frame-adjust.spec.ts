@@ -167,7 +167,11 @@ async function applyCrop(page: Page) {
 async function putSlotPhoto(page: Page, buffer: Buffer) {
   const centre = await at(page, 300, 286);
   await page.mouse.dblclick(centre.x, centre.y);
-  await page.locator('.stage input[type="file"]').setInputFiles({ ...FILENAME, buffer });
+  await expect(page.getByTestId('slot-sheet')).toBeVisible();
+  await page.getByTestId('slot-input').setInputFiles({ ...FILENAME, buffer });
+  await expect(page.getByTestId('slot-sheet').locator('.slot-photo img')).toBeVisible();
+  await page.getByTestId('slot-done').click();
+  await expect(page.getByTestId('slot-sheet')).toHaveCount(0);
   await page.waitForTimeout(800);
 }
 

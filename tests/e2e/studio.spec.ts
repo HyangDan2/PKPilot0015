@@ -53,7 +53,7 @@ test.describe('HD2Lab shell', () => {
     await page.getByTestId('more-menu').click();
     await expect(page.locator('.nav-kicker').first()).toHaveText('NAVIGATION');
     const enMenu = await page.locator('.nav-pop').innerText();
-    for (const label of ['HD2Lab Web-HQ', 'ApplicationHub', 'Shutterplate', 'Nordlys']) {
+    for (const label of ['HD2Lab Web-HQ', 'ApplicationHub', 'Shutterplate', 'CinePlate']) {
       expect(enMenu).toContain(label);
     }
     await page.keyboard.press('Escape');
@@ -197,7 +197,7 @@ test.describe('help, saving and sharing', () => {
     await openStudio(page);
     await page.getByTestId('more-menu').click();
     const menu = await page.locator('.nav-pop').innerText();
-    for (const label of ['HD2Lab Web-HQ', 'ApplicationHub', 'Shutterplate', 'Nordlys', '도움말', '.shutterframe.json 불러오기', '내 프레임 초기화']) {
+    for (const label of ['HD2Lab Web-HQ', 'ApplicationHub', 'Shutterplate', 'CinePlate', '도움말', '.shutterframe.json 불러오기', '내 프레임 초기화']) {
       expect(menu).toContain(label);
     }
 

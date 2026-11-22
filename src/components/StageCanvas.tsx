@@ -25,7 +25,8 @@ export interface StageCanvasProps {
   onScale: (scale: number) => void;
   onSelect: (selection: Selection) => void;
   onSpecChange: (next: ShutterFrameSpec) => void;
-  onSlotFile: (index: number, file: File) => void;
+  /** A double click (or double tap) on a cut asks for its photo sheet. */
+  onSlotOpen: (index: number) => void;
   /** The compact bar for the selected element, drawn over the plate. */
   overlay?: React.ReactNode;
 }
@@ -99,8 +100,8 @@ export function StageCanvas(props: StageCanvasProps) {
   const { spec, selection } = props;
   const wrap = useRef<HTMLDivElement | null>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
-  const fileInput = useRef<HTMLInputElement | null>(null);
-  const pendingSlot = useRef(0);
+  /* where and when the last tap landed, so two of them open the cut's sheet */
+  const lastTap = useRef<{ at: number; x: number; y: number } | null>(null);
   const drag = useRef<DragState | null>(null);
   const pending = useRef<Pending | null>(null);
   const held = useRef<Map<number, Held>>(new Map());
@@ -737,6 +738,18 @@ export function StageCanvas(props: StageCanvasProps) {
       if (!gesture.moved && event?.type === 'pointerup') {
         if (gesture.tapSelect) props.onSelect(gesture.tapSelect);
         else if (gesture.tapToDeselect) props.onSelect(null);
+        /* A second tap on the same cut, soon enough after the first, opens its
+           sheet on a phone as surely as a double click does on a desktop. */
+        const now = Date.now();
+        const hit = hitTest(spec, toDesign(event.clientX, event.clientY));
+        if (hit && hit.kind === 'cell') {
+          const prior = lastTap.current;
+          const close = prior && now - prior.at < 360 && Math.hypot(event.clientX - prior.x, event.clientY - prior.y) < 26;
+          lastTap.current = close ? null : { at: now, x: event.clientX, y: event.clientY };
+          if (close) props.onSlotOpen(hit.index);
+        } else {
+          lastTap.current = null;
+        }
       }
     } else if (gesture && gesture.kind === 'pinch') {
       viewGesture.current = null;
@@ -768,16 +781,20 @@ export function StageCanvas(props: StageCanvasProps) {
     const pt = toDesign(event.clientX, event.clientY);
     for (let index = 0; index < spec.cells.length; index += 1) {
       if (sf().hitLayer(spec, { kind: 'cell', index }, pt, measure)) {
-        pendingSlot.current = index;
-        fileInput.current?.click();
+        lastTap.current = null;
+        props.onSlotOpen(index);
         return;
       }
     }
   };
 
+  /* On a phone a long press must not raise the selection magnifier over the
+     plate: the frame is a surface to work on, not text to copy. */
+  const blockNative = (event: React.SyntheticEvent) => event.preventDefault();
+
   return (
-    <div className="stage">
-      <div className="stage-wrap" ref={wrap}>
+    <div className="stage" onContextMenu={blockNative}>
+      <div className="stage-wrap" ref={wrap} onContextMenu={blockNative}>
         <canvas
           ref={canvas}
           className="stage-canvas"
@@ -789,6 +806,7 @@ export function StageCanvas(props: StageCanvasProps) {
           data-pan-y={props.view.pan.y.toFixed(2)}
           data-origin-x={shownOrigin.x.toFixed(2)}
           data-origin-y={shownOrigin.y.toFixed(2)}
+          onContextMenu={blockNative}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
@@ -800,17 +818,6 @@ export function StageCanvas(props: StageCanvasProps) {
       {props.overlay}
       <div className="stage-hint">{t('stage.hint')}</div>
       <div className="stage-spec">{t('stage.spec', { w: spec.canvas.width, h: spec.canvas.height, n: spec.cells.length })}</div>
-      <input
-        ref={fileInput}
-        type="file"
-        accept="image/*"
-        hidden
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) props.onSlotFile(pendingSlot.current, file);
-          event.target.value = '';
-        }}
-      />
     </div>
   );
 }

@@ -2,7 +2,7 @@
  * Typed face of the shared `public/shutterframe.js` engine. The engine itself is
  * one classic script the three apps load, so the spec, the validator, the
  * painter and the share codec can never drift between FrameBuilder,
- * Shutterplate and Nordlys.
+ * Shutterplate and CinePlate.
  *
  * v1 documents written before the touch editor still load unchanged: `rotation`
  * and `z` default to 0 / the legacy order and `stickers` is simply empty.
@@ -19,6 +19,15 @@ export interface FrameBackgroundImage {
   opacity: number;
 }
 
+export type FrameTextureKind = 'cotton' | 'archive' | 'none';
+
+/** The paper the frame is printed on: matte cotton rag or archival stock. */
+export interface FrameTexture {
+  kind: FrameTextureKind;
+  /** 0–1; scaled grain, fibre and matte edge. */
+  strength: number;
+}
+
 export interface FrameCanvas {
   width: number;
   height: number;
@@ -26,6 +35,8 @@ export interface FrameCanvas {
   gradient?: FrameGradient;
   /** A photograph cropped in the editor, painted over the colour/gradient. */
   backgroundImage?: FrameBackgroundImage;
+  /** Grain under the photographs; the engine prints matte cotton by default. */
+  texture?: FrameTexture;
   light: boolean;
 }
 
