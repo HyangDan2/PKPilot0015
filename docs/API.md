@@ -96,8 +96,9 @@ Documents written before this layer existed have no `id` or `mono`: they validat
 | One-finger short tap | Selects the slot / text / sticker / logo under it; a tap on an empty spot clears the selection. |
 | One-finger drag on the **selected** element | Moves it, with snap guides. |
 | One-finger drag on an unselected element or an empty spot | Pans the plate; the document is untouched. |
-| Two fingers within 0.15 s | Always the viewport's pinch (zoom around the midpoint) and pan. A layer drag the first finger had begun is reverted. |
-| Two fingers after holding the selected element ≥ 0.15 s | That element's own pinch: size and rotation. |
+| Two fingers with nothing selected | Always the viewport's pinch (zoom around the midpoint) and pan, wherever they land — a frame nobody chose is never grabbed. |
+| Two fingers on the selected element | That element's own pinch: size, rotation and slide, from the document as it stood when they landed. A drag the first finger had begun on it is kept. |
+| Two fingers on any other layer, or the margin | The viewport's pinch; a layer drag the first finger had begun is reverted. |
 | Corner grips / top rotation grip | Resize and rotate the selection, whatever the timing. |
 
 The plate remembers its own viewport (`zoom` + `pan`) separately from the document, so zooming
