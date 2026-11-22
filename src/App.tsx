@@ -16,16 +16,28 @@ import type { Selection } from './editor/selection';
 import { NO_PAN, clampZoom, stepZoom, type View } from './editor/viewport';
 import { I18nContext, translate, type Lang, type TKey, type Vars } from './i18n';
 
-const THEME_KEY = 'mynda.theme';
-const LANG_KEY = 'mynda.lang';
+/* The studio's own keys, with the names the app used before it was renamed:
+   a visitor who chose a theme and a language then keeps both. */
+const THEME_KEY = 'framebuilder.theme';
+const LANG_KEY = 'framebuilder.lang';
+const LEGACY_THEME_KEY = 'mynda.theme';
+const LEGACY_LANG_KEY = 'mynda.lang';
 const WIDE = '(min-width: 1024px)';
 
+function stored(key: string, legacy: string): string | null {
+  try {
+    return localStorage.getItem(key) ?? localStorage.getItem(legacy);
+  } catch {
+    return null;
+  }
+}
+
 function storedLang(): Lang {
-  return localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'ko';
+  return stored(LANG_KEY, LEGACY_LANG_KEY) === 'en' ? 'en' : 'ko';
 }
 
 function storedTheme(): 'iris' | 'navy' {
-  return localStorage.getItem(THEME_KEY) === 'iris' ? 'iris' : 'navy';
+  return stored(THEME_KEY, LEGACY_THEME_KEY) === 'iris' ? 'iris' : 'navy';
 }
 
 export default function App() {
@@ -353,9 +365,9 @@ export default function App() {
     say(t('toast.imported', { name: result.spec.name }));
   };
 
-  const shareLink = (app: 'mynda' | 'shutterplate' | 'nordlys') => {
+  const shareLink = (app: 'framebuilder' | 'shutterplate' | 'nordlys') => {
     if (!spec) return '';
-    const base = app === 'mynda'
+    const base = app === 'framebuilder'
       ? `${window.location.origin}${import.meta.env.BASE_URL}`
       : app === 'shutterplate'
         ? 'https://hyangdan2.github.io/PKPilot0003/'
@@ -364,7 +376,7 @@ export default function App() {
   };
 
   const copyLink = async () => {
-    const link = shareLink('mynda');
+    const link = shareLink('framebuilder');
     try {
       await navigator.clipboard.writeText(link);
       say(
@@ -568,6 +580,15 @@ export default function App() {
     commit(sf().touch(next, {}));
   };
 
+  const addEmblem = () => {
+    if (!spec) return;
+    const next = sf().addEmblem(spec);
+    commit(next);
+    setSelection({ kind: 'emblem' });
+    if (window.matchMedia(WIDE).matches) setRightOpen(true);
+    say(t('toast.emblemAdded'));
+  };
+
   const replaceSlotPhoto = () => {
     if (selection?.kind !== 'cell') return;
     slotIndex.current = selection.index;
@@ -677,6 +698,14 @@ export default function App() {
             onDuplicate={duplicate}
             onDeleteLibrary={deleteFrame}
             onToggleVisible={toggleVisible}
+            onAddEmblem={addEmblem}
+            onRemoveEmblem={() => {
+              const next = sf().clone(spec);
+              next.emblem = { ...next.emblem, enabled: false };
+              commit(sf().touch(next, {}));
+              setSelection(null);
+              say(t('toast.emblemRemoved'));
+            }}
             onLayerZ={(ref, dir) => stepLayer(ref, dir)}
             onToggleOverlay={() => {
               if (!spec.overlay) return;
@@ -797,7 +826,7 @@ export default function App() {
 }
 
 function slug(name: string): string {
-  return name.trim().toLowerCase().replace(/[^a-z0-9가-힣]+/g, '-').replace(/^-|-$/g, '') || 'mynda-frame';
+  return name.trim().toLowerCase().replace(/[^a-z0-9가-힣]+/g, '-').replace(/^-|-$/g, '') || 'framebuilder-frame';
 }
 
 function readAsDataURL(file: File): Promise<string> {

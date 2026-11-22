@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { sf, type FrameAlign, type FrameFamily, type ShutterFrameSpec } from '../spec/shutterframe';
+import { sf, type FrameAlign, type FrameEmblem, type FrameFamily, type ShutterFrameSpec } from '../spec/shutterframe';
 import { Icon } from './Icons';
 import { Drawer } from './Drawer';
 import { useI18n } from '../i18n';
@@ -51,6 +51,94 @@ function NumField({ label, value, min, max, step, onChange }: {
         onChange={(event) => onChange(Number(event.target.value))}
       />
     </label>
+  );
+}
+
+/**
+ * The logo controls both the properties rail and the frame section use: which
+ * maker's mark, whether it prints in the maker's own colour or one ink, where
+ * it sits, how big it is and how it turns — the same switches Shutterplate's
+ * plate carries, so a frame made here prints the same mark there.
+ */
+function EmblemControls({ spec, emblem, onChange, onRemove }: {
+  spec: ShutterFrameSpec;
+  emblem: FrameEmblem;
+  onChange: (next: ShutterFrameSpec) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useI18n();
+  const marks = sf().emblemList();
+  const update = (patch: Partial<FrameEmblem>) => {
+    const next = sf().clone(spec);
+    next.emblem = { ...next.emblem, ...patch, enabled: true };
+    onChange(sf().touch(next, {}));
+  };
+  return (
+    <>
+      <Field label={t('props.emblemType')} hint={t('props.emblemTypeHint')}>
+        <select
+          data-testid="emblem-type"
+          value={emblem.id ?? 'hd2lab'}
+          onChange={(event) => update({ id: event.target.value })}
+        >
+          {marks.map((mark) => (
+            <option key={mark.id} value={mark.id}>{mark.name}</option>
+          ))}
+        </select>
+      </Field>
+      <Field label={t('props.emblemColor')} hint={t('props.emblemColorHint')}>
+        <div className="preset-grid">
+          <button
+            type="button"
+            data-testid="emblem-brand"
+            className={`chip${emblem.mono ? '' : ' on'}`}
+            aria-pressed={!emblem.mono}
+            onClick={() => update({ mono: false })}
+          >
+            {t('props.emblemBrand')}
+          </button>
+          <button
+            type="button"
+            data-testid="emblem-mono"
+            className={`chip${emblem.mono ? ' on' : ''}`}
+            aria-pressed={!!emblem.mono}
+            onClick={() => update({ mono: true })}
+          >
+            {t('props.emblemMono')}
+          </button>
+        </div>
+      </Field>
+      <div className="pair">
+        <NumField label="X" value={emblem.x} onChange={(v) => update({ x: v })} />
+        <NumField label="Y" value={emblem.y} onChange={(v) => update({ y: v })} />
+      </div>
+      <div className="pair">
+        <NumField label={t('props.maxW')} value={emblem.maxW} min={8} onChange={(v) => update({ maxW: v })} />
+        <NumField label={t('props.maxH')} value={emblem.maxH} min={8} onChange={(v) => update({ maxH: v })} />
+      </div>
+      <div className="pair">
+        <Field label={t('props.align')}>
+          <select value={emblem.align} onChange={(event) => update({ align: event.target.value as FrameAlign })}>
+            <option value="left">{t('props.alignLeft')}</option>
+            <option value="center">{t('props.alignCenter')}</option>
+            <option value="right">{t('props.alignRight')}</option>
+          </select>
+        </Field>
+        <Field label={t('props.ink')}>
+          <select value={emblem.mode} onChange={(event) => update({ mode: event.target.value as 'auto' | 'light' | 'dark' })}>
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </Field>
+      </div>
+      <NumField label={t('props.rotation')} value={emblem.rotation ?? 0} min={-180} max={180} onChange={(v) => update({ rotation: v })} />
+      <div className="row-btns">
+        <button type="button" className="btn ghost small danger" data-testid="emblem-delete" onClick={onRemove}>
+          <Icon name="trash" size={13} /> {t('props.emblemDelete')}
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -219,7 +307,7 @@ function PropertiesBody(props: RightDrawerProps) {
               <button type="button" className="btn ghost small" onClick={() => update({ visible: item.visible === false })}>
                 <Icon name={item.visible === false ? 'eye' : 'eyeOff'} size={13} /> {item.visible === false ? t('props.showAgain') : t('props.hide')}
               </button>
-              <button type="button" className="btn ghost small danger" onClick={() => {
+              <button type="button" className="btn ghost small danger" data-testid="text-delete" onClick={() => {
                 const next = sf().clone(spec);
                 next.texts = next.texts.filter((row) => row.id !== item.id);
                 props.onChange(sf().touch(next, {}));
@@ -231,44 +319,16 @@ function PropertiesBody(props: RightDrawerProps) {
         );
       })()}
 
-      {selection?.kind === 'emblem' && (() => {
+      {selection?.kind === 'emblem' && spec.emblem.enabled !== false && (() => {
         const e = spec.emblem;
-        const update = (p: Partial<typeof e>) => {
-          const next = sf().clone(spec);
-          next.emblem = { ...next.emblem, ...p };
-          props.onChange(sf().touch(next, {}));
-        };
         return (
           <section className="rail-section">
-            <h3 className="rail-title">{t('props.emblem')} <small>HD2Lab</small></h3>
-            <div className="pair">
-              <NumField label="X" value={e.x} onChange={(v) => update({ x: v })} />
-              <NumField label="Y" value={e.y} onChange={(v) => update({ y: v })} />
-            </div>
-            <div className="pair">
-              <NumField label={t('props.maxW')} value={e.maxW} min={8} onChange={(v) => update({ maxW: v })} />
-              <NumField label={t('props.maxH')} value={e.maxH} min={8} onChange={(v) => update({ maxH: v })} />
-            </div>
-            <div className="pair">
-              <Field label={t('props.align')}>
-                <select value={e.align} onChange={(event) => update({ align: event.target.value as FrameAlign })}>
-                  <option value="left">{t('props.alignLeft')}</option>
-                  <option value="center">{t('props.alignCenter')}</option>
-                  <option value="right">{t('props.alignRight')}</option>
-                </select>
-              </Field>
-              <Field label={t('props.ink')}>
-                <select value={e.mode} onChange={(event) => update({ mode: event.target.value as 'auto' | 'light' | 'dark' })}>
-                  <option value="auto">Auto</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </select>
-              </Field>
-            </div>
-            <NumField label={t('props.rotation')} value={e.rotation ?? 0} min={-180} max={180} onChange={(v) => update({ rotation: v })} />
-            <button type="button" className="btn ghost small" onClick={() => update({ enabled: !e.enabled })}>
-              <Icon name={e.enabled ? 'eyeOff' : 'eye'} size={13} /> {e.enabled ? t('props.emblemOff') : t('props.emblemOn')}
-            </button>
+            <h3 className="rail-title">{t('props.emblem')} <small>{sf().emblemOf(e.id ?? 'hd2lab').name}</small></h3>
+            <EmblemControls spec={spec} emblem={e} onChange={props.onChange} onRemove={() => {
+              const next = sf().clone(spec);
+              next.emblem = { ...next.emblem, enabled: false };
+              props.onChange(sf().touch(next, {}));
+            }} />
           </section>
         );
       })()}
@@ -450,6 +510,33 @@ function PropertiesBody(props: RightDrawerProps) {
     </section>
   );
 
+  const emblem = spec.emblem;
+  const emblemSection = (
+    <section className="rail-section">
+      <h3 className="rail-title">
+        {t('props.emblem')} <small>{emblem.enabled === false ? t('props.emblemOffLabel') : sf().emblemOf(emblem.id ?? 'hd2lab').name}</small>
+      </h3>
+      {emblem.enabled === false ? (
+        <button type="button" className="drop-zone" data-testid="emblem-add" onClick={() => props.onChange(sf().addEmblem(spec))}>
+          <Icon name="plus" size={18} />
+          <span>{t('props.emblemAdd')}</span>
+          <small>{t('props.emblemAddHint')}</small>
+        </button>
+      ) : (
+        <EmblemControls
+          spec={spec}
+          emblem={emblem}
+          onChange={props.onChange}
+          onRemove={() => {
+            const next = sf().clone(spec);
+            next.emblem = { ...next.emblem, enabled: false };
+            props.onChange(sf().touch(next, {}));
+          }}
+        />
+      )}
+    </section>
+  );
+
   const perforationSection = (
     <section className="rail-section">
       <h3 className="rail-title">{t('props.perforation')} <small>{t('props.perforationHint')}</small></h3>
@@ -539,6 +626,7 @@ function PropertiesBody(props: RightDrawerProps) {
     <>
       {selection ? selectionSections : <p className="drawer-empty">{t('drawer.props.empty')}</p>}
       {frameSection}
+      {selection?.kind === 'emblem' ? null : emblemSection}
       {perforationSection}
       {overlaySection}
       <input

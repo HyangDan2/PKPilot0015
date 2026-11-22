@@ -15,7 +15,7 @@ export interface HeaderProps {
 
 /**
  * The HD2Lab title bar, slimmed to the four controls every app carries:
- * [dual-skew mark] HD2Lab | Mynda Ljósa … KO | EN · theme · ⋮
+ * [dual-skew mark] HD2Lab | FrameBuilder … KO | EN · theme · ⋮
  * Everything that used to crowd this row now lives in the floating dock,
  * the drawers, or the ⋮ menu.
  */
@@ -28,7 +28,7 @@ export function Header(props: HeaderProps) {
       <div className="topbar-brand">
         <span className="mark" aria-hidden="true" />
         <span className="brand-name">HD2Lab</span>
-        <em className="brand-app">Mynda Ljósa</em>
+        <em className="brand-app">FrameBuilder</em>
       </div>
 
       <div className="topbar-status" aria-live="polite">
@@ -65,7 +65,7 @@ export function Header(props: HeaderProps) {
         >
           <Icon name={props.theme === 'navy' ? 'sun' : 'moon'} size={17} />
         </button>
-        <NavMenu self="mynda" onHelp={props.onHelp} onImportJson={props.onImportJson} onReset={props.onReset} />
+        <NavMenu self="framebuilder" onHelp={props.onHelp} onImportJson={props.onImportJson} onReset={props.onReset} />
       </div>
     </header>
   );

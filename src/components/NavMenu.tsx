@@ -8,12 +8,12 @@ export const HD2_LINKS: { id: string; label: TKey; note: TKey; href: string }[] 
   { id: 'apphub', label: 'menu.apphub', note: 'menu.apphubNote', href: 'https://hyangdan2.github.io/ApplicationHub/' },
   { id: 'shutterplate', label: 'menu.shutterplate', note: 'menu.shutterplateNote', href: 'https://hyangdan2.github.io/PKPilot0003/' },
   { id: 'nordlys', label: 'menu.nordlys', note: 'menu.nordlysNote', href: 'https://hyangdan2.github.io/PKPilot0011/' },
-  { id: 'mynda', label: 'menu.mynda', note: 'menu.myndaNote', href: 'https://hyangdan2.github.io/PKPilot0015/' },
+  { id: 'framebuilder', label: 'menu.framebuilder', note: 'menu.framebuilderNote', href: 'https://hyangdan2.github.io/PKPilot0015/' },
 ];
 
 export interface NavMenuProps {
   /** The app the visitor is in; its own row is not repeated. */
-  self: 'mynda';
+  self: 'framebuilder';
   onHelp: () => void;
   onImportJson: () => void;
   onReset: () => void;

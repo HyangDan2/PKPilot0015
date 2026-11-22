@@ -1,4 +1,4 @@
-/* HD2Lab Mynda Ljósa — Navy & Lavender (default) / Soft Iris (light) */
+/* HD2Lab FrameBuilder — Navy & Lavender (default) / Soft Iris (light) */
 
 :root {
   --font-sans: "Inter", "Pretendard", "Helvetica Neue", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -102,7 +102,7 @@ img { display: block; max-width: 100%; }
     var(--bg);
 }
 
-/* ── header: [mark] HD2Lab | Mynda Ljósa … KO | EN · theme · ⋮ ─────────── */
+/* ── header: [mark] HD2Lab | FrameBuilder … KO | EN · theme · ⋮ ─────────── */
 .topbar {
   flex: 0 0 var(--header);
   height: var(--header);

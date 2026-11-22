@@ -30,7 +30,8 @@ const ALIGN: { mode: AlignMode; icon: string; key: 'align.hCenter' | 'align.vCen
 export function ContextToolbar(props: ContextToolbarProps) {
   const { t } = useI18n();
   const { selection } = props;
-  const removable = selection.kind === 'text' || selection.kind === 'sticker';
+  const duplicable = selection.kind === 'text' || selection.kind === 'sticker';
+  const removable = duplicable || selection.kind === 'emblem';
   const named = selection.kind === 'cell'
     ? t('context.slot', { n: String(selection.index + 1).padStart(2, '0') })
     : selection.kind === 'text' ? t('context.text')
@@ -65,10 +66,12 @@ export function ContextToolbar(props: ContextToolbarProps) {
         {removable && (
           <>
             <span className="context-sep" />
-            <button type="button" className="tool" onClick={props.onDuplicate} title={t('action.duplicate')} aria-label={t('action.duplicate')}>
-              <Icon name="copy" size={16} />
-            </button>
-            <button type="button" className="tool danger" onClick={props.onDelete} title={t('props.remove')} aria-label={t('props.remove')}>
+            {duplicable && (
+              <button type="button" className="tool" onClick={props.onDuplicate} title={t('action.duplicate')} aria-label={t('action.duplicate')}>
+                <Icon name="copy" size={16} />
+              </button>
+            )}
+            <button type="button" className="tool danger" data-testid="context-delete" onClick={props.onDelete} title={t('props.remove')} aria-label={t('props.remove')}>
               <Icon name="trash" size={16} />
             </button>
           </>

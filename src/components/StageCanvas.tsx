@@ -43,6 +43,25 @@ interface DragState {
   startAngle?: number;
   pinch?: { dist: number; angle: number; mid: Point; rotation: number };
   moved: boolean;
+  startedAt: number;
+  fromSelected: boolean;
+}
+
+/**
+ * The moment between a finger landing and a gesture being certain: a finger
+ * that lands on the selected layer is only a candidate drag, so a second
+ * finger arriving quickly can still turn the whole thing into a viewport
+ * pinch, and a finger that never moves is a tap that edits nothing.
+ */
+interface Pending {
+  id: number;
+  target: Exclude<Selection, null>;
+  mode: Exclude<DragMode, 'pinch'>;
+  box: LayerBounds;
+  start: Point;
+  startClient: Point;
+  startedAt: number;
+  corner?: Corner;
 }
 
 /** One finger on the glass, read three ways at once. */
@@ -54,10 +73,17 @@ interface Held {
 
 /** A gesture that moves the viewport rather than a layer on it. */
 type ViewGesture =
-  | { kind: 'pan'; id: number; start: Point; base: Pan; moved: boolean; tapToDeselect: boolean }
+  | { kind: 'pan'; id: number; start: Point; base: Pan; moved: boolean; tapToDeselect: boolean; tapSelect?: Exclude<Selection, null> }
   | { kind: 'pinch'; baseDist: number; scale: number; anchor: Point };
 
+/** A finger must travel this far (px) before it is a drag rather than a tap. */
 const PAN_THRESHOLD = 3;
+/**
+ * Two fingers that land within this window are always the viewport's pinch,
+ * whatever the first one touched — reaching to zoom must never resize a photo.
+ * Hold a selected layer longer than this and a second finger pinches the layer.
+ */
+const QUICK_PINCH_MS = 150;
 
 /**
  * The plate, and a finger's whole vocabulary on it: tap to select, drag to
@@ -76,6 +102,7 @@ export function StageCanvas(props: StageCanvasProps) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const pendingSlot = useRef(0);
   const drag = useRef<DragState | null>(null);
+  const pending = useRef<Pending | null>(null);
   const held = useRef<Map<number, Held>>(new Map());
   const viewGesture = useRef<ViewGesture | null>(null);
   const spaceHeld = useRef(false);
@@ -425,17 +452,24 @@ export function StageCanvas(props: StageCanvasProps) {
     };
   }, []);
 
-  const begin = (mode: DragMode, target: Exclude<Selection, null>, box: LayerBounds, pt: Point, corner?: Corner) => {
+  const begin = (mode: DragMode, target: Exclude<Selection, null>, box: LayerBounds, pt: Point, corner?: Corner, startedAt = Date.now()) => {
     drag.current = {
       /* `base` is an independent deep copy: every frame of the gesture is
          measured from here, never from the value the last frame left behind. */
       mode, target, base: sf().clone(spec), next: sf().clone(spec), box, start: pt, corner, moved: false,
       startAngle: Math.atan2(pt.y - box.cy, pt.x - box.cx) * 180 / Math.PI,
+      startedAt,
+      fromSelected: true,
     };
   };
 
-  const startPan = (event: React.PointerEvent<HTMLCanvasElement>, tapToDeselect: boolean) => {
+  const startPan = (
+    event: React.PointerEvent<HTMLCanvasElement>,
+    tapToDeselect: boolean,
+    tapSelect?: Exclude<Selection, null>,
+  ) => {
     drag.current = null;
+    pending.current = null;
     setGuides({ v: [], h: [] });
     viewGesture.current = {
       kind: 'pan',
@@ -444,6 +478,7 @@ export function StageCanvas(props: StageCanvasProps) {
       base: { ...viewRef.current.pan },
       moved: false,
       tapToDeselect,
+      tapSelect,
     };
   };
 
@@ -463,28 +498,42 @@ export function StageCanvas(props: StageCanvasProps) {
     }
 
     if (held.current.size === 2) {
-      const layerDown = drag.current && drag.current.mode === 'move' ? drag.current : null;
-      const target = layerDown ? layerDown.target : null;
-      if (target && target.kind !== 'overlay' && layerDown) {
-        /* two fingers began on the layer the first one is holding: that is the
-           layer's pinch, not the viewport's */
-        const box = layerDown.box;
-        if (box) {
-          viewGesture.current = null;
-          drag.current = {
-            mode: 'pinch', target, base: sf().clone(spec), next: sf().clone(spec), box, start: pt,
-            pinch: pinchOf(box), moved: false,
-          };
-          event.preventDefault();
-          return;
-        }
+      /* The first finger's intent, if it had time to have one: a layer it had
+         held for longer than QUICK_PINCH_MS, and only when that layer was
+         already the selection. Everything else — a fast second finger, a bare
+         spot, an unselected layer — is the viewport's pinch. */
+      const dragging = drag.current;
+      const waiting = pending.current;
+      const anchor = dragging
+        ? { target: dragging.target, startedAt: dragging.startedAt, fromSelected: dragging.fromSelected, box: dragging.box }
+        : waiting
+          ? { target: waiting.target, startedAt: waiting.startedAt, fromSelected: true, box: waiting.box }
+          : null;
+      const settled = anchor ? Date.now() - anchor.startedAt >= QUICK_PINCH_MS : false;
+      if (anchor && settled && anchor.target.kind !== 'overlay' && anchor.box) {
+        /* the layer's own pinch: grow it and turn it, as before */
+        pending.current = null;
+        viewGesture.current = null;
+        drag.current = {
+          mode: 'pinch', target: anchor.target, base: sf().clone(spec), next: sf().clone(spec), box: anchor.box, start: pt,
+          pinch: pinchOf(anchor.box), moved: false, startedAt: anchor.startedAt, fromSelected: true,
+        };
+        event.preventDefault();
+        return;
       }
+      /* a quick second finger cancels whatever the first one had started: a
+         dragged layer goes back to where it was, and the view zooms instead */
+      if (dragging && dragging.moved) {
+        props.onSpecChange(sf().touch(dragging.base, {}));
+      }
+      pending.current = null;
+      drag.current = null;
+      setGuides({ v: [], h: [] });
+      setAngleBadge(null);
       const [a, b] = Array.from(held.current.values()).map((item) => item.local);
       if (a && b) {
         const baseDist = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
         const baseMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        drag.current = null;
-        setGuides({ v: [], h: [] });
         viewGesture.current = {
           kind: 'pinch',
           baseDist,
@@ -505,16 +554,23 @@ export function StageCanvas(props: StageCanvasProps) {
       return;
     }
 
+    const now = Date.now();
     const current = selection;
     if (current && current.kind !== 'overlay') {
       const box = boundsOf(spec, current);
       if (box) {
         const handle: Handle | null = hitHandle(pt, box, scaleNow);
-        if (handle === 'rotate') { begin('rotate', current, box, pt); return; }
-        if (handle) { begin('resize', current, box, pt, handle); return; }
+        if (handle === 'rotate') {
+          pending.current = { id: event.pointerId, target: current, mode: 'rotate', box, start: pt, startClient: { x: event.clientX, y: event.clientY }, startedAt: now };
+          return;
+        }
+        if (handle) {
+          pending.current = { id: event.pointerId, target: current, mode: 'resize', box, start: pt, startClient: { x: event.clientX, y: event.clientY }, startedAt: now, corner: handle };
+          return;
+        }
         const ref = layerRef(current);
         if (ref && sf().hitLayer(spec, { ...ref, vars } as LayerRef & { vars: Record<string, string> }, pt, measure)) {
-          begin('move', current, box, pt);
+          pending.current = { id: event.pointerId, target: current, mode: 'move', box, start: pt, startClient: { x: event.clientX, y: event.clientY }, startedAt: now };
           return;
         }
       }
@@ -522,9 +578,10 @@ export function StageCanvas(props: StageCanvasProps) {
 
     const hit = hitTest(spec, pt);
     if (hit) {
-      props.onSelect(hit);
-      const box = boundsOf(spec, hit);
-      if (box) begin('move', hit, box, pt);
+      /* An unselected layer: a short tap picks it, a drag moves the plate. Its
+         selection is decided on release, so a pinch that follows a fast second
+         finger never flicks a drawer open under the zooming hand. */
+      startPan(event, false, hit);
       return;
     }
 
@@ -587,6 +644,16 @@ export function StageCanvas(props: StageCanvasProps) {
         insets,
       ));
       return;
+    }
+
+    /* a candidate drag turns real only once the finger has travelled past the
+       tap's dead zone; until then the plate has not been edited at all */
+    const waiting = pending.current;
+    if (waiting && waiting.id === event.pointerId) {
+      const travel = Math.hypot(event.clientX - waiting.startClient.x, event.clientY - waiting.startClient.y);
+      if (travel <= PAN_THRESHOLD) return;
+      pending.current = null;
+      begin(waiting.mode, waiting.target, waiting.box, waiting.start, waiting.corner, waiting.startedAt);
     }
 
     const state = drag.current;
@@ -660,10 +727,17 @@ export function StageCanvas(props: StageCanvasProps) {
       held.current.clear();
     }
 
+    const wait = pending.current;
+    if (wait && (id === undefined || wait.id === id)) pending.current = null;
+
     const gesture = viewGesture.current;
     if (gesture && gesture.kind === 'pan') {
       viewGesture.current = null;
-      if (!gesture.moved && gesture.tapToDeselect && event?.type === 'pointerup') props.onSelect(null);
+      /* one short tap: pick the layer under it, or let the selection go */
+      if (!gesture.moved && event?.type === 'pointerup') {
+        if (gesture.tapSelect) props.onSelect(gesture.tapSelect);
+        else if (gesture.tapToDeselect) props.onSelect(null);
+      }
     } else if (gesture && gesture.kind === 'pinch') {
       viewGesture.current = null;
       /* a finger left on the glass keeps moving the viewport */
@@ -680,6 +754,7 @@ export function StageCanvas(props: StageCanvasProps) {
     if (state && state.moved) props.onSpecChange(sf().touch(state.next, {}));
     if (held.current.size === 0) {
       drag.current = null;
+      pending.current = null;
       viewGesture.current = null;
       setGuides({ v: [], h: [] });
       setAngleBadge(null);

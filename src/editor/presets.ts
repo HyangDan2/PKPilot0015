@@ -17,7 +17,11 @@ function cells(list: FrameCell[]): FrameCell[] {
   return list;
 }
 
-/** The photobooth overlay: a transparent centre with a printed border. */
+/**
+ * The photobooth overlay: a transparent centre with a printed border. It is
+ * pure frame artwork — every word the plate prints is a text layer the user
+ * can select, retype or delete, never lettering burned into an image.
+ */
 function boothOverlay(): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="1800" viewBox="0 0 600 1800">
 <g fill="none" stroke="#ffffff" stroke-width="54">
@@ -25,12 +29,6 @@ function boothOverlay(): string {
 </g>
 <g fill="none" stroke="#d9b7c8" stroke-width="2" stroke-dasharray="8 8">
   <rect x="66" y="66" width="468" height="1668" rx="10"/>
-</g>
-<g font-family="Helvetica, Arial, sans-serif" fill="#ffffff" text-anchor="middle">
-  <text x="300" y="96" font-size="22" letter-spacing="8">MYNDA LJÓSA</text>
-</g>
-<g font-family="Helvetica, Arial, sans-serif" fill="#ffffff" text-anchor="middle">
-  <text x="300" y="1752" font-size="18" letter-spacing="6">HD2LAB · FRAME STUDIO</text>
 </g>
 </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -61,7 +59,7 @@ function assemble(name: string, partial: Partial<ShutterFrameSpec>): ShutterFram
       { x: 36, y: 1296, w: 528, h: 380, radius: 4 },
     ],
     texts: [],
-    emblem: { enabled: true, x: 300, y: 1738, maxW: 240, maxH: 46, align: 'center', mode: 'auto' },
+    emblem: { enabled: true, id: 'hd2lab', mono: false, x: 300, y: 1738, maxW: 240, maxH: 46, align: 'center', mode: 'auto' },
     ...partial,
   } as ShutterFrameSpec;
   const checked = sf().validate(draft);
@@ -85,11 +83,12 @@ export const PRESETS: PresetDef[] = [
         { x: 36, y: 1296, w: 528, h: 380, radius: 4 },
       ]),
       texts: [
-        text({ id: 't-title', text: 'MYNDA LJÓSA', x: 300, y: 62, size: 26, weight: 700, letterSpacing: 6 }),
+        text({ id: 't-title', text: 'FRAMEBUILDER', x: 300, y: 62, size: 26, weight: 700, letterSpacing: 6 }),
+        text({ id: 't-foot', text: 'HD2LAB · FRAMEBUILDER', x: 300, y: 1788, size: 15, color: '#8a8177', letterSpacing: 4 }),
         text({ id: 't-date', text: '{{date}}', x: 300, y: 1740, size: 20, color: '#6b635a', letterSpacing: 2 }),
         text({ id: 't-cap', text: '{{caption}}', x: 300, y: 1706, size: 18, color: '#8a8177', family: 'serif' }),
       ],
-      emblem: { enabled: false, x: 300, y: 1738, maxW: 240, maxH: 46, align: 'center', mode: 'auto' },
+      emblem: { enabled: false, id: 'hd2lab', mono: false, x: 300, y: 1738, maxW: 240, maxH: 46, align: 'center', mode: 'auto' },
     }),
   },
   {
@@ -113,10 +112,10 @@ export const PRESETS: PresetDef[] = [
         { x: 610, y: 816, w: 526, h: 646, radius: 10 },
       ]),
       texts: [
-        text({ id: 't-title', text: 'MYNDA LJÓSA', x: 600, y: 96, size: 42, weight: 700, letterSpacing: 14 }),
+        text({ id: 't-title', text: 'FRAMEBUILDER', x: 600, y: 96, size: 42, weight: 700, letterSpacing: 14 }),
         text({ id: 't-sub', text: '{{date}} · {{camera}}', x: 600, y: 1520, size: 24, color: '#5a6b7d', letterSpacing: 2 }),
       ],
-      emblem: { enabled: true, x: 600, y: 1570, maxW: 260, maxH: 46, align: 'center', mode: 'auto' },
+      emblem: { enabled: true, id: 'hd2lab', mono: false, x: 600, y: 1570, maxW: 260, maxH: 46, align: 'center', mode: 'auto' },
     }),
   },
   {
@@ -135,12 +134,12 @@ export const PRESETS: PresetDef[] = [
         { x: 92, y: 1284, w: 496, h: 352, radius: 2 },
       ]),
       texts: [
-        text({ id: 't-title', text: 'MYNDA LJÓSA', x: 340, y: 88, size: 30, weight: 700, color: '#f2ede2', letterSpacing: 8 }),
+        text({ id: 't-title', text: 'FRAMEBUILDER', x: 340, y: 88, size: 30, weight: 700, color: '#f2ede2', letterSpacing: 8 }),
         text({ id: 't-film', text: '{{film}} · ISO {{iso}}', x: 340, y: 1716, size: 20, color: '#c9c2b5', family: 'mono', letterSpacing: 2 }),
         text({ id: 't-exif', text: '{{camera}} · {{shutter}} · f/{{aperture}}', x: 340, y: 1754, size: 16, color: '#948d81', family: 'mono' }),
         text({ id: 't-num', text: 'HD2 · FRAME 04', x: 340, y: 1852, size: 16, color: '#6f695f', family: 'mono', letterSpacing: 4 }),
       ],
-      emblem: { enabled: true, x: 340, y: 1812, maxW: 210, maxH: 40, align: 'center', mode: 'light' },
+      emblem: { enabled: true, id: 'hd2lab', mono: false, x: 340, y: 1812, maxW: 210, maxH: 40, align: 'center', mode: 'light' },
     }),
   },
   {
@@ -158,13 +157,13 @@ export const PRESETS: PresetDef[] = [
         { x: 548, y: 978, w: 592, h: 480, radius: 0 },
       ]),
       texts: [
-        text({ id: 't-mast', text: 'MYNDA', x: 60, y: 120, size: 84, weight: 800, align: 'left', color: '#1d1b19', letterSpacing: -2 }),
-        text({ id: 't-mast2', text: 'LJÓSA', x: 560, y: 120, size: 84, weight: 300, align: 'left', color: '#8d6c80', letterSpacing: -2 }),
+        text({ id: 't-mast', text: 'FRAME', x: 60, y: 120, size: 84, weight: 800, align: 'left', color: '#1d1b19', letterSpacing: -2 }),
+        text({ id: 't-mast2', text: 'BUILDER', x: 560, y: 120, size: 84, weight: 300, align: 'left', color: '#8d6c80', letterSpacing: -2 }),
         text({ id: 't-issue', text: 'ISSUE 04 · {{date}}', x: 1140, y: 120, size: 24, weight: 600, align: 'right', color: '#1d1b19', letterSpacing: 3 }),
         text({ id: 't-cap', text: '{{caption}}', x: 60, y: 1540, size: 28, family: 'serif', align: 'left', color: '#3a352f' }),
         text({ id: 't-shot', text: '{{camera}} · {{lens}} · {{shutter}}', x: 1140, y: 1540, size: 18, align: 'right', color: '#7c7368', family: 'mono' }),
       ],
-      emblem: { enabled: false, x: 60, y: 1580, maxW: 220, maxH: 44, align: 'left', mode: 'auto' },
+      emblem: { enabled: false, id: 'hd2lab', mono: false, x: 60, y: 1580, maxW: 220, maxH: 44, align: 'left', mode: 'auto' },
     }),
   },
   {
@@ -183,7 +182,9 @@ export const PRESETS: PresetDef[] = [
       ]),
       overlay: { dataUrl: boothOverlay(), layer: 'above', opacity: 1 },
       texts: [
+        text({ id: 't-title', text: 'FRAMEBUILDER', x: 300, y: 96, size: 22, weight: 700, color: '#ffffff', letterSpacing: 8 }),
         text({ id: 't-date', text: '{{date}}', x: 300, y: 1712, size: 16, color: '#ffffff', letterSpacing: 4 }),
+        text({ id: 't-foot', text: 'HD2LAB · FRAMEBUILDER', x: 300, y: 1752, size: 18, color: '#ffffff', letterSpacing: 6 }),
       ],
       emblem: { enabled: false, x: 300, y: 1738, maxW: 240, maxH: 46, align: 'center', mode: 'auto' },
     }),
@@ -196,7 +197,7 @@ export function blankSpec(name = '새 프레임'): ShutterFrameSpec {
       text({ id: 't-title', text: '{{title}}', x: 300, y: 62, size: 26, weight: 700, letterSpacing: 4 }),
       text({ id: 't-date', text: '{{date}}', x: 300, y: 1740, size: 20, color: '#6b635a', letterSpacing: 2 }),
     ],
-    emblem: { enabled: true, x: 300, y: 1782, maxW: 220, maxH: 40, align: 'center', mode: 'auto' },
+    emblem: { enabled: true, id: 'hd2lab', mono: false, x: 300, y: 1782, maxW: 220, maxH: 40, align: 'center', mode: 'auto' },
   });
 }
 
@@ -208,7 +209,7 @@ export const DEMO_FIELDS = {
   model: 'M6',
   lens: 'Summicron 35mm',
   film: 'Nordlys 400',
-  title: 'Mynda Ljósa',
+  title: 'FrameBuilder',
   caption: '겨울 바다, 오후 네 시',
   shutter: '1/250',
   iso: '400',

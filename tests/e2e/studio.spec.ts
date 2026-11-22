@@ -12,7 +12,7 @@ test.describe('HD2Lab shell', () => {
     await openStudio(page);
     await expect(page.locator('.topbar .mark')).toBeVisible();
     await expect(page.locator('.brand-name')).toHaveText('HD2Lab');
-    await expect(page.locator('.brand-app')).toHaveText('Mynda Ljósa');
+    await expect(page.locator('.brand-app')).toHaveText('FrameBuilder');
     await expect(page.getByTestId('lang-ko')).toBeVisible();
     await expect(page.getByTestId('lang-en')).toBeVisible();
     await expect(page.getByTestId('theme-toggle')).toBeVisible();
