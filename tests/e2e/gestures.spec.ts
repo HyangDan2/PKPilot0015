@@ -26,19 +26,24 @@ async function saveSpec(page: Page): Promise<SavedSpec> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as SavedSpec;
 }
 
-/** Where a design coordinate is drawn on screen, from the plate's own fit. */
+/** Where a design coordinate is drawn on screen, from the plate's own viewport. */
 async function plateMap(page: Page) {
   const spec = await saveSpec(page);
-  const readout = await page.locator('.zoom-readout').innerText();
-  const scale = Number.parseFloat(readout) / 100;
-  const box = (await page.locator('canvas.stage-canvas').boundingBox())!;
-  const ox = (box.width - spec.canvas.width * scale) / 2;
-  const oy = (box.height - spec.canvas.height * scale) / 2;
+  const canvas = page.locator('canvas.stage-canvas');
+  const box = (await canvas.boundingBox())!;
+  const view = await canvas.evaluate((el) => ({
+    scale: Number((el as HTMLCanvasElement).dataset.scale),
+    ox: Number((el as HTMLCanvasElement).dataset.originX),
+    oy: Number((el as HTMLCanvasElement).dataset.originY),
+  }));
   return {
-    scale,
+    scale: view.scale,
     spec,
     /** The canvas keeps pointer events: a click here is `page.mouse`-ready. */
-    at: (x: number, y: number) => ({ x: box.x + ox + x * scale, y: box.y + oy + y * scale }),
+    at: (x: number, y: number) => ({
+      x: box.x + view.ox + x * view.scale,
+      y: box.y + view.oy + y * view.scale,
+    }),
   };
 }
 
@@ -81,9 +86,13 @@ test.describe('dragging on the plate', () => {
     const after = await saveSpec(page);
     const expected = 40 / plate.scale;
     const moved = after.cells[0].x - cell.x;
-    expect(Math.abs(moved - expected)).toBeLessThanOrEqual(6);
-    /* a sideways drag may catch a magnet guide on a neighbouring slot's edge */
+    /* the drag lands where the finger went, give or take one magnet step: the
+       guides pull at 7px on screen, which is more design units the smaller the
+       plate is drawn */
     const snapReach = 7 / plate.scale + 2;
+    expect(Math.abs(moved - expected)).toBeLessThanOrEqual(snapReach);
+    expect(moved).toBeGreaterThan(expected * 0.6);
+    expect(moved).toBeLessThan(expected * 1.5);
     expect(Math.abs(after.cells[0].y - cell.y)).toBeLessThanOrEqual(snapReach);
     /* the bug threw the slot thousands of pixels off the 600-wide plate */
     expect(Math.abs(moved)).toBeLessThan(300);
@@ -121,9 +130,10 @@ test.describe('dragging on the plate', () => {
     const after = await saveSpec(page);
     const expected = screenDx / plate.scale;
     const moved = after.cells[0].x - cell.x;
-    expect(Math.abs(moved - expected)).toBeLessThanOrEqual(6);
+    const snapReach = 7 / plate.scale + 2;
+    expect(Math.abs(moved - expected)).toBeLessThanOrEqual(snapReach);
     expect(Math.abs(moved)).toBeLessThan(300);
-    expect(Math.abs(after.cells[0].y - cell.y)).toBeLessThanOrEqual(7 / plate.scale + 2);
+    expect(Math.abs(after.cells[0].y - cell.y)).toBeLessThanOrEqual(snapReach);
   });
 
   test('two fingers grow the slot by the pinch ratio once, not every frame', async ({ page }) => {

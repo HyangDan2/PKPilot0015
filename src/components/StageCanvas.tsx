@@ -7,6 +7,10 @@ import {
   type Box, type Corner, type Handle, type Point,
 } from '../editor/geometry';
 import { moveLayer, pinchLayer, resizeLayer } from '../editor/drag';
+import {
+  clampPan, fitInsets, originOf, pinchAround, resolveScale, toDesignPoint, zoomAround,
+  type Pan, type Size, type View,
+} from '../editor/viewport';
 
 export interface StageCanvasProps {
   spec: ShutterFrameSpec;
@@ -14,7 +18,9 @@ export interface StageCanvasProps {
   fields: FrameFields;
   selection: Selection;
   grid: boolean;
-  zoom: number | 'fit';
+  /** The plate's own viewport: 20%–400% and a free X/Y pan. */
+  view: View;
+  onView: (next: View) => void;
   /** The scale the plate is actually drawn at, for the dock's readout. */
   onScale: (scale: number) => void;
   onSelect: (selection: Selection) => void;
@@ -39,10 +45,28 @@ interface DragState {
   moved: boolean;
 }
 
+/** One finger on the glass, read three ways at once. */
+interface Held {
+  client: Point;
+  local: Point;
+  design: Point;
+}
+
+/** A gesture that moves the viewport rather than a layer on it. */
+type ViewGesture =
+  | { kind: 'pan'; id: number; start: Point; base: Pan; moved: boolean; tapToDeselect: boolean }
+  | { kind: 'pinch'; baseDist: number; scale: number; anchor: Point };
+
+const PAN_THRESHOLD = 3;
+
 /**
  * The plate, and a finger's whole vocabulary on it: tap to select, drag to
  * move (with magnet guides), corner grips to grow or shrink, the top grip to
  * turn, two fingers to pinch and twist. Nothing here needs an input box.
+ *
+ * The viewport is separate from those layers — wheel or two fingers zoom, an
+ * empty spot or Space turns the glass itself — so a frame bigger than the
+ * screen can be reached without touching what is painted on it.
  */
 export function StageCanvas(props: StageCanvasProps) {
   const { t } = useI18n();
@@ -52,7 +76,9 @@ export function StageCanvas(props: StageCanvasProps) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const pendingSlot = useRef(0);
   const drag = useRef<DragState | null>(null);
-  const pointers = useRef<Map<number, Point>>(new Map());
+  const held = useRef<Map<number, Held>>(new Map());
+  const viewGesture = useRef<ViewGesture | null>(null);
+  const spaceHeld = useRef(false);
   const [size, setSize] = useState({ w: 720, h: 640 });
   /* The box as the plate was last drawn in it — the reading a finger's maths
      should use, so a hit test can never be measured against a stale stage. */
@@ -76,15 +102,43 @@ export function StageCanvas(props: StageCanvasProps) {
 
   const designW = spec.canvas.width;
   const designH = spec.canvas.height;
+  const design: Size = useMemo(() => ({ w: designW, h: designH }), [designW, designH]);
   const boxW = Math.max(120, Math.round(liveBox.current.w || size.w));
   const boxH = Math.max(160, Math.round(liveBox.current.h || size.h));
-  const fit = Math.min((boxW - 40) / designW, (boxH - 40) / designH);
-  const scale = props.zoom === 'fit' ? Math.max(0.05, fit) : props.zoom;
+  const insetsFor = fitInsets(boxW);
+  const scale = resolveScale(props.view.zoom, { w: boxW, h: boxH }, design, insetsFor);
+  const shownOrigin = originOf(scale, props.view.pan, { w: boxW, h: boxH }, design, insetsFor);
   const vars = useMemo(() => sf().buildVars(spec, props.fields), [spec, props.fields]);
+
+  /* the newest view, readable from a native listener or a gesture that spans
+     several frames without waiting for a re-render */
+  const viewRef = useRef<View>(props.view);
+  useEffect(() => { viewRef.current = props.view; }, [props.view]);
+  const onViewRef = useRef(props.onView);
+  useEffect(() => { onViewRef.current = props.onView; }, [props.onView]);
+  const designRef = useRef<Size>(design);
+  useEffect(() => { designRef.current = design; }, [design]);
 
   const scaleRef = useRef(props.onScale);
   useEffect(() => { scaleRef.current = props.onScale; }, [props.onScale]);
   useEffect(() => { scaleRef.current(scale); }, [scale]);
+
+  /* A zoom preset or a resized stage can leave a far pan pushing the plate out
+     of reach; nudge it back to the last place a hand can still grab. */
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const cw = el.clientWidth || liveBox.current.w;
+    const ch = el.clientHeight || liveBox.current.h;
+    if (!cw || !ch) return;
+    const stage: Size = { w: cw, h: ch };
+    const insets = fitInsets(cw);
+    const s = resolveScale(props.view.zoom, stage, design, insets);
+    const reachable = clampPan(props.view.pan, s, stage, design, insets);
+    if (Math.abs(reachable.x - props.view.pan.x) > 0.5 || Math.abs(reachable.y - props.view.pan.y) > 0.5) {
+      props.onView({ zoom: props.view.zoom, pan: reachable });
+    }
+  }, [props.view, design, props.onView]);
 
   /* One measurer for hit testing, handles and the engine's own boxes. */
   const measure = useCallback((item: { size: number; weight: number; family: string; letterSpacing: number }, content: string) => {
@@ -142,14 +196,16 @@ export function StageCanvas(props: StageCanvasProps) {
     ctx.clearRect(0, 0, el.width, el.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const fitLive = Math.min((cw - 40) / designW, (ch - 40) / designH);
-    const s = props.zoom === 'fit' ? Math.max(0.05, fitLive) : props.zoom;
+    const stage: Size = { w: cw, h: ch };
+    const insets = fitInsets(cw);
+    const s = resolveScale(props.view.zoom, stage, design, insets);
     if (typeof scaleRef.current === 'function' && Math.abs((lastScale.current ?? -1) - s) > 0.0005) {
       lastScale.current = s;
       scaleRef.current(s);
     }
-    const ox = (cw - designW * s) / 2;
-    const oy = (ch - designH * s) / 2;
+    const origin = originOf(s, props.view.pan, stage, design, insets);
+    const ox = origin.x;
+    const oy = origin.y;
 
     ctx.save();
     ctx.shadowColor = 'rgba(4,7,16,0.45)';
@@ -263,7 +319,7 @@ export function StageCanvas(props: StageCanvasProps) {
       ctx.restore();
     }
     ctx.restore();
-  }, [spec, props.slots, props.fields, props.grid, selection, scale, size, designW, designH, guides, boundsOf]);
+  }, [spec, props.slots, props.fields, props.view, props.grid, selection, scale, size, design, designW, designH, guides, boundsOf]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -274,10 +330,18 @@ export function StageCanvas(props: StageCanvasProps) {
     const el = canvas.current;
     if (!el) return { x: 0, y: 0 };
     const rect = el.getBoundingClientRect();
-    const ox = (rect.width - designW * scale) / 2;
-    const oy = (rect.height - designH * scale) / 2;
-    return { x: (clientX - rect.left - ox) / scale, y: (clientY - rect.top - oy) / scale };
-  }, [designW, designH, scale]);
+    const stage: Size = { w: rect.width, h: rect.height };
+    const insets = fitInsets(stage.w);
+    const s = resolveScale(viewRef.current.zoom, stage, design, insets);
+    return toDesignPoint(
+      { x: clientX - rect.left, y: clientY - rect.top },
+      s,
+      viewRef.current.pan,
+      stage,
+      design,
+      insets,
+    );
+  }, [design]);
 
   const hitTest = useCallback((s: ShutterFrameSpec, pt: Point): Selection => {
     const rows = sf().paintOrder(s).slice().reverse();
@@ -299,7 +363,7 @@ export function StageCanvas(props: StageCanvasProps) {
   }, [measure, vars]);
 
   const pinchOf = (box: LayerBounds) => {
-    const pts = Array.from(pointers.current.values());
+    const pts = Array.from(held.current.values()).map((item) => item.design);
     if (pts.length < 2) return undefined;
     const [a, b] = pts;
     return {
@@ -310,6 +374,57 @@ export function StageCanvas(props: StageCanvasProps) {
     };
   };
 
+  /* ── wheel and trackpad: zoom where the cursor is ───────────────────────── */
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return;
+      event.preventDefault();
+      const stage: Size = { w: rect.width, h: rect.height };
+      const insets = fitInsets(stage.w);
+      /* a pinch arrives as a ctrl+wheel with small deltas; a mouse wheel as a
+         handful of 100s — both should feel like one step of the same size */
+      const unit = event.ctrlKey ? 0.01 : 0.0016;
+      const factor = Math.exp(-event.deltaY * unit);
+      const local = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      onViewRef.current(zoomAround(
+        viewRef.current.zoom,
+        viewRef.current.pan,
+        local,
+        factor,
+        stage,
+        designRef.current,
+        insets,
+      ));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  /* ── Space is the second hand: hold it and the plate is a camera ────────── */
+  useEffect(() => {
+    const inField = (target: EventTarget | null) => {
+      const node = target as HTMLElement | null;
+      if (!node || !node.tagName) return false;
+      return node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || node.tagName === 'SELECT' || node.isContentEditable === true;
+    };
+    const down = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && !inField(event.target)) spaceHeld.current = true;
+    };
+    const up = (event: KeyboardEvent) => { if (event.code === 'Space') spaceHeld.current = false; };
+    const blur = () => { spaceHeld.current = false; };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, []);
+
   const begin = (mode: DragMode, target: Exclude<Selection, null>, box: LayerBounds, pt: Point, corner?: Corner) => {
     drag.current = {
       /* `base` is an independent deep copy: every frame of the gesture is
@@ -317,6 +432,104 @@ export function StageCanvas(props: StageCanvasProps) {
       mode, target, base: sf().clone(spec), next: sf().clone(spec), box, start: pt, corner, moved: false,
       startAngle: Math.atan2(pt.y - box.cy, pt.x - box.cx) * 180 / Math.PI,
     };
+  };
+
+  const startPan = (event: React.PointerEvent<HTMLCanvasElement>, tapToDeselect: boolean) => {
+    drag.current = null;
+    setGuides({ v: [], h: [] });
+    viewGesture.current = {
+      kind: 'pan',
+      id: event.pointerId,
+      start: { x: event.clientX, y: event.clientY },
+      base: { ...viewRef.current.pan },
+      moved: false,
+      tapToDeselect,
+    };
+  };
+
+  const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const el = event.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const stage: Size = { w: rect.width, h: rect.height };
+    const insets = fitInsets(stage.w);
+    const scaleNow = resolveScale(viewRef.current.zoom, stage, design, insets);
+    const local = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const pt = toDesignPoint(local, scaleNow, viewRef.current.pan, stage, design, insets);
+    held.current.set(event.pointerId, { client: { x: event.clientX, y: event.clientY }, local, design: pt });
+    try {
+      el.setPointerCapture(event.pointerId);
+    } catch {
+      /* a pointer the browser no longer tracks still moves with the finger */
+    }
+
+    if (held.current.size === 2) {
+      const layerDown = drag.current && drag.current.mode === 'move' ? drag.current : null;
+      const target = layerDown ? layerDown.target : null;
+      if (target && target.kind !== 'overlay' && layerDown) {
+        /* two fingers began on the layer the first one is holding: that is the
+           layer's pinch, not the viewport's */
+        const box = layerDown.box;
+        if (box) {
+          viewGesture.current = null;
+          drag.current = {
+            mode: 'pinch', target, base: sf().clone(spec), next: sf().clone(spec), box, start: pt,
+            pinch: pinchOf(box), moved: false,
+          };
+          event.preventDefault();
+          return;
+        }
+      }
+      const [a, b] = Array.from(held.current.values()).map((item) => item.local);
+      if (a && b) {
+        const baseDist = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+        const baseMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        drag.current = null;
+        setGuides({ v: [], h: [] });
+        viewGesture.current = {
+          kind: 'pinch',
+          baseDist,
+          scale: scaleNow,
+          /* the design point under the fingers stays under the fingers */
+          anchor: toDesignPoint(baseMid, scaleNow, viewRef.current.pan, stage, design, insets),
+        };
+        event.preventDefault();
+        return;
+      }
+    }
+    if (held.current.size > 1) return;
+
+    /* a middle button or the Space bar turns any spot into the camera */
+    if (event.button === 1 || spaceHeld.current) {
+      startPan(event, false);
+      event.preventDefault();
+      return;
+    }
+
+    const current = selection;
+    if (current && current.kind !== 'overlay') {
+      const box = boundsOf(spec, current);
+      if (box) {
+        const handle: Handle | null = hitHandle(pt, box, scaleNow);
+        if (handle === 'rotate') { begin('rotate', current, box, pt); return; }
+        if (handle) { begin('resize', current, box, pt, handle); return; }
+        const ref = layerRef(current);
+        if (ref && sf().hitLayer(spec, { ...ref, vars } as LayerRef & { vars: Record<string, string> }, pt, measure)) {
+          begin('move', current, box, pt);
+          return;
+        }
+      }
+    }
+
+    const hit = hitTest(spec, pt);
+    if (hit) {
+      props.onSelect(hit);
+      const box = boundsOf(spec, hit);
+      if (box) begin('move', hit, box, pt);
+      return;
+    }
+
+    /* an empty spot: a drag moves the viewport, a tap lets the selection go */
+    startPan(event, true);
   };
 
   const setRotation = (target: Exclude<Selection, null>, next: ShutterFrameSpec, deg: number) => {
@@ -334,67 +547,57 @@ export function StageCanvas(props: StageCanvasProps) {
     }
   };
 
-  const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const pt = toDesign(event.clientX, event.clientY);
-    pointers.current.set(event.pointerId, pt);
-    try {
-      (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId);
-    } catch {
-      /* a pointer the browser no longer tracks still moves with the finger */
-    }
-
-    if (pointers.current.size === 2) {
-      const target = selection ?? null;
-      if (target && target.kind !== 'overlay') {
-        const box = boundsOf(spec, target);
-        if (box) {
-          drag.current = {
-            mode: 'pinch', target, base: sf().clone(spec), next: sf().clone(spec), box, start: pt,
-            pinch: pinchOf(box), moved: false,
-          };
-          event.preventDefault();
-          return;
-        }
-      }
-    }
-    if (pointers.current.size > 1) return;
-
-    const current = selection;
-    if (current && current.kind !== 'overlay') {
-      const box = boundsOf(spec, current);
-      if (box) {
-        const handle: Handle | null = hitHandle(pt, box, scale);
-        if (handle === 'rotate') { begin('rotate', current, box, pt); return; }
-        if (handle) { begin('resize', current, box, pt, handle); return; }
-        const ref = layerRef(current);
-        if (ref && sf().hitLayer(spec, { ...ref, vars } as LayerRef & { vars: Record<string, string> }, pt, measure)) {
-          begin('move', current, box, pt);
-          return;
-        }
-      }
-    }
-
-    const hit = hitTest(spec, pt);
-    props.onSelect(hit);
-    if (hit) {
-      const box = boundsOf(spec, hit);
-      if (box) begin('move', hit, box, pt);
-    } else {
-      drag.current = null;
-      setGuides({ v: [], h: [] });
-    }
-  };
-
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!pointers.current.has(event.pointerId)) return;
-    const pt = toDesign(event.clientX, event.clientY);
-    pointers.current.set(event.pointerId, pt);
+    const known = held.current.get(event.pointerId);
+    if (!known) return;
+    const el = event.currentTarget;
+    const rect = el.getBoundingClientRect();
+    known.client = { x: event.clientX, y: event.clientY };
+    known.local = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+
+    const gesture = viewGesture.current;
+    if (gesture) {
+      const stage: Size = { w: rect.width, h: rect.height };
+      const insets = fitInsets(stage.w);
+      if (gesture.kind === 'pan') {
+        const dx = event.clientX - gesture.start.x;
+        const dy = event.clientY - gesture.start.y;
+        if (!gesture.moved && Math.hypot(dx, dy) < PAN_THRESHOLD) return;
+        gesture.moved = true;
+        event.preventDefault();
+        const s = resolveScale(viewRef.current.zoom, stage, design, insets);
+        onViewRef.current({
+          zoom: viewRef.current.zoom,
+          pan: clampPan({ x: gesture.base.x + dx, y: gesture.base.y + dy }, s, stage, design, insets),
+        });
+        return;
+      }
+      const [a, b] = Array.from(held.current.values()).map((item) => item.local);
+      if (!a || !b) return;
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      event.preventDefault();
+      onViewRef.current(pinchAround(
+        gesture.anchor,
+        gesture.scale,
+        dist / gesture.baseDist,
+        mid,
+        stage,
+        design,
+        insets,
+      ));
+      return;
+    }
+
     const state = drag.current;
     if (!state) return;
+    const scaleNow = resolveScale(viewRef.current.zoom, { w: rect.width, h: rect.height }, design, fitInsets(rect.width));
+    const pt = toDesignPoint(known.local, scaleNow, viewRef.current.pan, { w: rect.width, h: rect.height }, design, fitInsets(rect.width));
+    known.design = pt;
     event.preventDefault();
 
     if (state.mode === 'pinch') {
-      const pts = Array.from(pointers.current.values());
+      const pts = Array.from(held.current.values()).map((item) => item.design);
       if (pts.length < 2 || !state.pinch) return;
       const [a, b] = pts;
       const dist = Math.hypot(b.x - a.x, b.y - a.y);
@@ -407,9 +610,9 @@ export function StageCanvas(props: StageCanvasProps) {
         x: state.box.cx + (mid.x - state.pinch.mid.x),
         y: state.box.cy + (mid.y - state.pinch.mid.y),
       };
-      const rect = { x: center.x - w / 2, y: center.y - h / 2, w, h };
+      const rect2 = { x: center.x - w / 2, y: center.y - h / 2, w, h };
       const next = state.next;
-      pinchLayer(state.target, state.base, next, ratio, rect);
+      pinchLayer(state.target, state.base, next, ratio, rect2);
       const delta = (angle - state.pinch.angle) * 180 / Math.PI;
       setRotation(state.target, next, state.pinch.rotation + delta);
       state.moved = true;
@@ -424,7 +627,7 @@ export function StageCanvas(props: StageCanvasProps) {
 
     if (state.mode === 'move') {
       const moved = { ...state.box, x: state.box.x + dx, y: state.box.y + dy };
-      const snap = snapMove(moved, othersOf(state.base, target), { w: designW, h: designH }, scale);
+      const snap = snapMove(moved, othersOf(state.base, target), { w: designW, h: designH }, scaleNow);
       setGuides(snap.guides);
       moveLayer(target, state.base, state.next, dx + snap.dx, dy + snap.dy);
       props.onSpecChange({ ...state.next });
@@ -432,8 +635,8 @@ export function StageCanvas(props: StageCanvasProps) {
     }
 
     if (state.mode === 'resize' && state.corner) {
-      const rect = resizeBox(state.box.box, state.box.rotation, state.corner, pt);
-      resizeLayer(target, state.base, state.next, rect, state.box.box, (item) => measure(item, sf().applyVars(item.text, vars)));
+      const rect2 = resizeBox(state.box.box, state.box.rotation, state.corner, pt);
+      resizeLayer(target, state.base, state.next, rect2, state.box.box, (item) => measure(item, sf().applyVars(item.text, vars)));
       props.onSpecChange({ ...state.next });
       return;
     }
@@ -449,12 +652,35 @@ export function StageCanvas(props: StageCanvasProps) {
   };
 
   const endDrag = (event?: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event) pointers.current.delete(event.pointerId);
-    else pointers.current.clear();
+    const id = event?.pointerId;
+    if (id !== undefined) {
+      held.current.delete(id);
+      try { event?.currentTarget.releasePointerCapture(id); } catch { /* already gone */ }
+    } else {
+      held.current.clear();
+    }
+
+    const gesture = viewGesture.current;
+    if (gesture && gesture.kind === 'pan') {
+      viewGesture.current = null;
+      if (!gesture.moved && gesture.tapToDeselect && event?.type === 'pointerup') props.onSelect(null);
+    } else if (gesture && gesture.kind === 'pinch') {
+      viewGesture.current = null;
+      /* a finger left on the glass keeps moving the viewport */
+      const rest = Array.from(held.current.entries())[0];
+      if (rest && held.current.size === 1) {
+        const [restId, point] = rest;
+        viewGesture.current = {
+          kind: 'pan', id: restId, start: { ...point.client }, base: { ...viewRef.current.pan }, moved: true, tapToDeselect: false,
+        };
+      }
+    }
+
     const state = drag.current;
     if (state && state.moved) props.onSpecChange(sf().touch(state.next, {}));
-    if (pointers.current.size === 0) {
+    if (held.current.size === 0) {
       drag.current = null;
+      viewGesture.current = null;
       setGuides({ v: [], h: [] });
       setAngleBadge(null);
     } else if (state && state.mode === 'pinch') {
@@ -482,6 +708,12 @@ export function StageCanvas(props: StageCanvasProps) {
           className="stage-canvas"
           aria-label={t('stage.canvasLabel')}
           style={{ width: '100%', height: '100%' }}
+          data-scale={scale.toFixed(4)}
+          data-zoom={props.view.zoom === 'fit' ? 'fit' : props.view.zoom.toFixed(3)}
+          data-pan-x={props.view.pan.x.toFixed(2)}
+          data-pan-y={props.view.pan.y.toFixed(2)}
+          data-origin-x={shownOrigin.x.toFixed(2)}
+          data-origin-y={shownOrigin.y.toFixed(2)}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}

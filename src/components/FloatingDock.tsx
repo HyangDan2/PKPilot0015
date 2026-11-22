@@ -15,6 +15,8 @@ export interface FloatingDockProps {
   onLeft: (tab: LeftTab) => void;
   onProps: () => void;
   onZoom: (zoom: number | 'fit') => void;
+  /** The `−` and `+` buttons: one small step of the same viewport. */
+  onZoomStep: (dir: 1 | -1) => void;
   onGrid: (value: boolean) => void;
   onSave: () => void;
   onCopyLink: () => void;
@@ -135,9 +137,30 @@ export function FloatingDock(props: FloatingDockProps) {
       <div className="dock dock-zoom">
         <div className="zoom-capsule" role="group" aria-label={t('dock.zoom')}>
           <button type="button" className={`zoom-btn${props.zoom === 'fit' ? ' on' : ''}`} data-testid="zoom-fit" onClick={() => props.onZoom('fit')}>{t('dock.zoomFit')}</button>
-          <button type="button" className={`zoom-btn${props.zoom === 0.5 ? ' on' : ''}`} data-testid="zoom-50" onClick={() => props.onZoom(0.5)}>50%</button>
-          <button type="button" className={`zoom-btn${props.zoom === 1 ? ' on' : ''}`} data-testid="zoom-100" onClick={() => props.onZoom(1)}>100%</button>
+          <button type="button" className={`zoom-btn zoom-preset${props.zoom === 0.5 ? ' on' : ''}`} data-testid="zoom-50" onClick={() => props.onZoom(0.5)}>50%</button>
+          <button type="button" className={`zoom-btn zoom-preset${props.zoom === 1 ? ' on' : ''}`} data-testid="zoom-100" onClick={() => props.onZoom(1)}>100%</button>
+          <span className="zoom-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="zoom-btn zoom-step"
+            data-testid="zoom-out"
+            aria-label={t('dock.zoomOut')}
+            title={t('dock.zoomOut')}
+            onClick={() => props.onZoomStep(-1)}
+          >
+            <Icon name="minus" size={13} />
+          </button>
           <span className="zoom-readout" aria-live="polite">{Math.round(props.scale * 100)}%</span>
+          <button
+            type="button"
+            className="zoom-btn zoom-step"
+            data-testid="zoom-in"
+            aria-label={t('dock.zoomIn')}
+            title={t('dock.zoomIn')}
+            onClick={() => props.onZoomStep(1)}
+          >
+            <Icon name="plus" size={13} />
+          </button>
           <span className="zoom-sep" aria-hidden="true" />
           <button
             type="button"

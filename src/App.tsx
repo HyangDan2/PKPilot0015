@@ -13,6 +13,7 @@ import { PRESETS, DEMO_FIELDS, blankSpec } from './editor/presets';
 import { loadDemoSlots, slotFromFile } from './editor/photos';
 import { prepareSprite } from './editor/images';
 import type { Selection } from './editor/selection';
+import { NO_PAN, clampZoom, stepZoom, type View } from './editor/viewport';
 import { I18nContext, translate, type Lang, type TKey, type Vars } from './i18n';
 
 const THEME_KEY = 'mynda.theme';
@@ -37,7 +38,7 @@ export default function App() {
   const [theme, setTheme] = useState<'iris' | 'navy'>(storedTheme);
   const [lang, setLangState] = useState<Lang>(storedLang);
   const [grid, setGrid] = useState(false);
-  const [zoom, setZoom] = useState<number | 'fit'>('fit');
+  const [view, setView] = useState<View>({ zoom: 'fit', pan: { ...NO_PAN } });
   const [scale, setScale] = useState(1);
   const [leftOpen, setLeftOpen] = useState(false);
   const [leftTab, setLeftTab] = useState<LeftTab>('presets');
@@ -70,6 +71,22 @@ export default function App() {
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 3200);
   }, []);
+
+  /* ── the viewport: fit / 50% / 100% / ± and a free X·Y pan ──────────────── */
+  const resetView = useCallback(() => setView({ zoom: 'fit', pan: { ...NO_PAN } }), []);
+
+  /** A fixed zoom keeps the place the user found; `fit` hands the plate back. */
+  const zoomTo = useCallback((next: number | 'fit') => {
+    if (next === 'fit') {
+      setView({ zoom: 'fit', pan: { ...NO_PAN } });
+      return;
+    }
+    setView((current) => ({ zoom: clampZoom(next), pan: current.pan }));
+  }, []);
+
+  const zoomStep = useCallback((dir: 1 | -1) => {
+    setView((current) => ({ zoom: stepZoom(current.zoom === 'fit' ? scale : current.zoom, dir), pan: current.pan }));
+  }, [scale]);
 
   const refreshLibrary = useCallback(async () => {
     try {
@@ -140,6 +157,7 @@ export default function App() {
       if (!incoming) return;
       void sf().primeAssets(incoming).then(() => setSpec(incoming as ShutterFrameSpec));
       setSelection(null);
+      resetView();
       say(t('toast.fromLink'));
       if (window.location.hash.indexOf('frame=') >= 0) {
         history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -237,6 +255,7 @@ export default function App() {
     await sf().primeAssets(next);
     setSpec(next);
     setSelection(null);
+    resetView();
     /* the new layout is part of the frame now, so it is saved like any edit */
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => { void persist(next); }, 550);
@@ -251,6 +270,7 @@ export default function App() {
     await sf().primeAssets(next);
     setSpec(next);
     setSelection(null);
+    resetView();
     setDirty(true);
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => { void persist(next); }, 400);
@@ -266,6 +286,7 @@ export default function App() {
     await sf().primeAssets(found);
     setSpec(found);
     setSelection(null);
+    resetView();
     say(t('toast.frameOpened', { name: found.name }));
     setLeftOpen(false);
   };
@@ -276,6 +297,7 @@ export default function App() {
     const next = PRESETS[0].build();
     setSpec(next);
     setSelection(null);
+    resetView();
     say(t('toast.created'));
     setLeftOpen(false);
   };
@@ -298,6 +320,7 @@ export default function App() {
       const fallback = rows[0] ?? PRESETS[0].build();
       await sf().primeAssets(fallback);
       setSpec(fallback);
+      resetView();
     }
     say(t('toast.deleted'));
   };
@@ -325,6 +348,7 @@ export default function App() {
     await sf().primeAssets(result.spec);
     setSpec(result.spec);
     setSelection(null);
+    resetView();
     await persist(result.spec);
     say(t('toast.imported', { name: result.spec.name }));
   };
@@ -399,6 +423,7 @@ export default function App() {
     const next = PRESETS[0].build();
     setSpec(next);
     setSelection(null);
+    resetView();
     await refreshLibrary();
     say(t('toast.reset'));
   };
@@ -604,7 +629,8 @@ export default function App() {
             fields={fields}
             selection={selection}
             grid={grid}
-            zoom={zoom}
+            view={view}
+            onView={setView}
             onScale={setScale}
             onSelect={selectFromCanvas}
             onSpecChange={commit}
@@ -697,13 +723,14 @@ export default function App() {
             leftTab={leftTab}
             rightOpen={rightOpen}
             hasSelection={!!selection}
-            zoom={zoom}
+            zoom={view.zoom}
             grid={grid}
             scale={scale}
             saving={saving}
             onLeft={openLeft}
             onProps={openRight}
-            onZoom={setZoom}
+            onZoom={zoomTo}
+            onZoomStep={zoomStep}
             onGrid={setGrid}
             onSave={saveFile}
             onCopyLink={copyLink}

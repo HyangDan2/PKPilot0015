@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react';
 
 const PATHS: Record<string, string> = {
   plus: 'M12 5v14M5 12h14',
+  minus: 'M5 12h14',
   save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8',
   upload: 'M12 16V4 M7 9l5-5 5 5 M4 20h16',
   download: 'M12 4v12 M7 11l5 5 5-5 M4 20h16',
