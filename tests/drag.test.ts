@@ -198,8 +198,15 @@ describe('the canvas wires every gesture through the base-relative helpers', () 
 
   it('freezes an independent copy of the spec when a gesture begins', () => {
     /* `base: spec` kept a live reference; `sf().clone` is the deep copy that stays still */
-    expect(source.match(/base: sf\(\)\.clone\(spec\)/g)?.length).toBe(2);
+    expect(source.match(/base: sf\(\)\.clone\(/g)?.length).toBe(2);
     expect(source).not.toMatch(/base: spec,/);
+  });
+
+  it('two fingers belong to where they land, not to how long the first one waited', () => {
+    expect(source).not.toContain('QUICK_PINCH_MS');
+    expect(source).toContain('layerBetween');
+    expect(source).toContain("mode: 'pinch'");
+    expect(source).toContain('props.onSelect(caught)');
   });
 
   it('never adds a pointer delta to the frame it is already writing', () => {

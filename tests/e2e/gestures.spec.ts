@@ -10,9 +10,10 @@ import type { Page } from '@playwright/test';
 
 type SavedSpec = {
   canvas: { width: number; height: number };
-  cells: { x: number; y: number; w: number; h: number }[];
+  cells: CellBox[];
   texts: { id: string; x: number; y: number; size: number }[];
 };
+type CellBox = { x: number; y: number; w: number; h: number; rotation?: number };
 
 async function saveSpec(page: Page): Promise<SavedSpec> {
   if (isMobile(page)) await page.getByTestId('dock-save-toggle').click();
@@ -67,6 +68,48 @@ async function selectFirstSlot(page: Page) {
 /** The scale the plate is drawn at: a viewport pinch changes it, a layer one does not. */
 async function plateScale(page: Page) {
   return page.locator('canvas.stage-canvas').evaluate((el) => Number((el as HTMLCanvasElement).dataset.scale));
+}
+
+/** 'fit' until a hand zooms the glass itself; a layer pinch must leave it alone. */
+async function plateZoom(page: Page) {
+  return page.locator('canvas.stage-canvas').evaluate((el) => (el as HTMLCanvasElement).dataset.zoom);
+}
+
+/** A screen point turned by `deg` and pushed away from `mid` by `spread`. */
+function twist(point: Pt, mid: Pt, deg: number, spread: number): Pt {
+  const rad = (deg * Math.PI) / 180;
+  const dx = (point.x - mid.x) * spread;
+  const dy = (point.y - mid.y) * spread;
+  return { x: mid.x + dx * Math.cos(rad) - dy * Math.sin(rad), y: mid.y + dx * Math.sin(rad) + dy * Math.cos(rad) };
+}
+
+/** Two fingers: both land, then travel to where the twist took them. */
+async function twoFingers(
+  page: Page,
+  a: Pt,
+  b: Pt,
+  a2: Pt,
+  b2: Pt,
+  steps = 15,
+  ids: [number, number] = [81, 82],
+) {
+  await page.evaluate(({ a, b, a2, b2, steps, ids }) => {
+    const canvas = document.querySelector('canvas.stage-canvas') as HTMLCanvasElement;
+    const fire = (type: string, id: number, clientX: number, clientY: number) => {
+      canvas.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerId: id, pointerType: 'touch',
+        isPrimary: id === ids[0], clientX, clientY, buttons: type === 'pointerup' ? 0 : 1,
+      }));
+    };
+    fire('pointerdown', ids[0], a.x, a.y);
+    fire('pointerdown', ids[1], b.x, b.y);
+    for (let step = 1; step <= steps; step += 1) {
+      fire('pointermove', ids[0], a.x + ((a2.x - a.x) * step) / steps, a.y + ((a2.y - a.y) * step) / steps);
+      fire('pointermove', ids[1], b.x + ((b2.x - b.x) * step) / steps, b.y + ((b2.y - b.y) * step) / steps);
+    }
+    fire('pointerup', ids[0], a2.x, a2.y);
+    fire('pointerup', ids[1], b2.x, b2.y);
+  }, { a, b, a2, b2, steps, ids });
 }
 
 /** The viewport pan, which a drag on an unselected layer moves instead of the layer. */
@@ -192,7 +235,7 @@ test.describe('dragging on the plate', () => {
     expect(Math.abs(after.cells[0].y - cell.y)).toBeLessThanOrEqual(snapReach);
   });
 
-  test('two fingers pinched on a held slot grow it by the ratio once, not every frame', async ({ page }) => {
+  test('two fingers on the selected slot grow it by the ratio once, not every frame', async ({ page }) => {
     await openStudio(page);
     const plate = await selectFirstSlot(page);
     const cell = plate.spec.cells[0];
@@ -203,9 +246,7 @@ test.describe('dragging on the plate', () => {
     const outerLeft = plate.at(centerX - 100, midY);
     const outerRight = plate.at(centerX + 100, midY);
 
-    /* hold the selected slot first: only then is a second finger the layer's */
     await fire(page, 'pointerdown', 21, near);
-    await page.waitForTimeout(220);
     await fire(page, 'pointerdown', 22, far);
     await glide(page, 21, near, outerLeft, 15);
     await glide(page, 22, far, outerRight, 15);
@@ -220,68 +261,115 @@ test.describe('dragging on the plate', () => {
     expect(after.cells[0].w).toBeLessThan(2000);
   });
 
-  test('two fingers in a hurry zoom the plate, never the slot under them', async ({ page }) => {
+  test('two fingers on an unselected slot take it at once and grow and turn it', async ({ page }) => {
     await openStudio(page);
-    const plate = await selectFirstSlot(page);
-    const scaleBefore = await plateScale(page);
+    const plate = await plateMap(page);
     const cell = plate.spec.cells[0];
-    const centerX = cell.x + cell.w / 2;
-    const midY = cell.y + cell.h / 2;
-    const a = plate.at(centerX - 50, midY);
-    const b = plate.at(centerX + 50, midY);
-    const a2 = plate.at(centerX - 110, midY);
-    const b2 = plate.at(centerX + 110, midY);
+    const mid = plate.at(cell.x + cell.w / 2, cell.y + cell.h / 2);
+    const a = { x: mid.x - 44, y: mid.y };
+    const b = { x: mid.x + 44, y: mid.y };
+    const a2 = twist(a, mid, 20, 1.7);
+    const b2 = twist(b, mid, 20, 1.7);
 
-    /* both fingers land in the same breath, as a reaching hand does */
-    await page.evaluate(({ a, b, a2, b2 }) => {
-      const canvas = document.querySelector('canvas.stage-canvas') as HTMLCanvasElement;
-      const fire = (type: string, id: number, clientX: number, clientY: number) => {
-        canvas.dispatchEvent(new PointerEvent(type, {
-          bubbles: true, cancelable: true, pointerId: id, pointerType: 'touch',
-          isPrimary: id === 81, clientX, clientY, buttons: type === 'pointerup' ? 0 : 1,
-        }));
-      };
-      fire('pointerdown', 81, a.x, a.y);
-      fire('pointerdown', 82, b.x, b.y);
-      for (let step = 1; step <= 15; step += 1) {
-        fire('pointermove', 81, a.x + ((a2.x - a.x) * step) / 15, a.y + ((a2.y - a.y) * step) / 15);
-        fire('pointermove', 82, b.x + ((b2.x - b.x) * step) / 15, b.y + ((b2.y - b.y) * step) / 15);
-      }
-      fire('pointerup', 81, a2.x, a2.y);
-      fire('pointerup', 82, b2.x, b2.y);
-    }, { a, b, a2, b2 });
+    /* no hold, no tap first: the fingers land on the plate and twist */
+    await twoFingers(page, a, b, a2, b2);
 
-    expect(await plateScale(page)).toBeGreaterThan(scaleBefore * 1.4);
+    expect(await plateZoom(page), 'the glass did not zoom').toBe('fit');
     const after = await saveSpec(page);
-    expect(after.cells[0].w, 'the slot keeps its size').toBe(cell.w);
-    expect(after.cells[0].x).toBe(cell.x);
+    const ratio = after.cells[0].w / cell.w;
+    expect(ratio, 'the slot grew with the fingers').toBeGreaterThan(1.45);
+    expect(ratio).toBeLessThan(2.1);
+    expect(Math.abs((after.cells[0].rotation ?? 0) - 20), 'the slot turned with the fingers').toBeLessThanOrEqual(6);
+    await expect(page.getByTestId('context-bar')).toHaveAttribute('aria-label', /01/);
   });
 
-  test('a quick second finger cancels the drag the first one had started', async ({ page }) => {
+  test('two fingers that straddle a slot take it, even when one lands on the margin', async ({ page }) => {
+    await openStudio(page);
+    const plate = await plateMap(page);
+    const cell = plate.spec.cells[0];
+    const midY = cell.y + cell.h / 2;
+    /* the first finger on the paper beside the cut, the second inside it, so
+       the middle between them is over the cut */
+    const a = plate.at(cell.x - 20, midY);
+    const b = plate.at(cell.x + 120, midY);
+    const a2 = { x: a.x - 30, y: a.y };
+    const b2 = { x: b.x + 30, y: b.y };
+
+    await twoFingers(page, a, b, a2, b2, 15, [83, 84]);
+
+    expect(await plateZoom(page), 'the glass did not zoom').toBe('fit');
+    const after = await saveSpec(page);
+    expect(after.cells[0].w / cell.w, 'the cut between the fingers grew').toBeGreaterThan(1.3);
+  });
+
+  test('a twist shows the angle badge while the fingers are still down', async ({ page }) => {
     await openStudio(page);
     const plate = await selectFirstSlot(page);
+    const cell = plate.spec.cells[0];
+    const mid = plate.at(cell.x + cell.w / 2, cell.y + cell.h / 2);
+    const a = { x: mid.x - 44, y: mid.y };
+    const b = { x: mid.x + 44, y: mid.y };
+    const a2 = twist(a, mid, 32, 1.2);
+    const b2 = twist(b, mid, 32, 1.2);
+    const badge = page.locator('.stage-angle');
+
+    await fire(page, 'pointerdown', 87, a);
+    await fire(page, 'pointerdown', 88, b);
+    await glide(page, 87, a, a2, 8);
+    await glide(page, 88, b, b2, 8);
+    await expect(badge, 'the angle reads while the hand is on the plate').toBeVisible();
+    await expect(badge).toHaveText(/°$/);
+    await fire(page, 'pointerup', 87, a2);
+    await fire(page, 'pointerup', 88, b2);
+    await expect(badge).toHaveCount(0);
+  });
+
+  test('two fingers on the bare stage zoom the viewport, never a slot', async ({ page }) => {
+    await openStudio(page);
+    const plate = await plateMap(page);
     const scaleBefore = await plateScale(page);
     const cell = plate.spec.cells[0];
-    const start = plate.at(cell.x + cell.w / 2, cell.y + cell.h / 2);
-    const second = { x: start.x + 60, y: start.y };
-    const pulled = { x: start.x + 24, y: start.y };
-    const spreadA = { x: start.x - 40, y: start.y };
-    const spreadB = { x: second.x + 40, y: second.y };
+    const top = plate.at(0, 0);
+    /* the empty paper above the plate: no layer lives there */
+    const a = { x: top.x + 20, y: top.y - 26 };
+    const b = { x: top.x + 90, y: top.y - 26 };
+    const a2 = { x: a.x - 40, y: a.y };
+    const b2 = { x: b.x + 40, y: b.y };
 
-    /* the finger drags the slot a little, then a second finger lands at once */
-    await fire(page, 'pointerdown', 91, start);
-    await glide(page, 91, start, pulled, 4);
+    await twoFingers(page, a, b, a2, b2, 15, [89, 90]);
+
+    expect(await plateScale(page), 'the view zoomed').toBeGreaterThan(scaleBefore * 1.4);
+    expect(Number(await plateZoom(page))).toBeGreaterThan(0.2);
+    const after = await saveSpec(page);
+    expect(after.cells[0], 'the slot keeps its size and place').toEqual(cell);
+  });
+
+  test('a second finger on the slot a finger is dragging turns it instead of zooming', async ({ page }) => {
+    await openStudio(page);
+    const plate = await selectFirstSlot(page);
+    const cell = plate.spec.cells[0];
+    const center = plate.at(cell.x + cell.w / 2, cell.y + cell.h / 2);
+    /* a short drag, then a second finger a little way off: the two fingers
+       keep the place the drag had already given the slot */
+    const pulled = { x: center.x + 24, y: center.y };
+    const second = { x: pulled.x + 48, y: pulled.y };
+    const spreadA = { x: pulled.x - 12, y: pulled.y };
+    const spreadB = { x: second.x + 12, y: second.y };
+
+    await fire(page, 'pointerdown', 91, center);
+    await glide(page, 91, center, pulled, 4);
     await fire(page, 'pointerdown', 92, second);
     await glide(page, 91, pulled, spreadA, 10);
     await glide(page, 92, second, spreadB, 10);
     await fire(page, 'pointerup', 91, spreadA);
     await fire(page, 'pointerup', 92, spreadB);
 
-    expect(await plateScale(page), 'the view zoomed instead').toBeGreaterThan(scaleBefore * 1.4);
+    expect(await plateZoom(page), 'the view stayed where it was').toBe('fit');
     const after = await saveSpec(page);
-    expect(after.cells[0].x, 'the slot went back where it was').toBe(cell.x);
-    expect(after.cells[0].y).toBe(cell.y);
-    expect(after.cells[0].w).toBe(cell.w);
+    expect(after.cells[0].w / cell.w, 'the slot grew under the two fingers').toBeGreaterThan(1.35);
+    expect(after.cells[0].w / cell.w).toBeLessThan(1.75);
+    const grewCenter = after.cells[0].x + after.cells[0].w / 2;
+    expect(grewCenter, 'the drag it had already been given stayed').toBeGreaterThan(cell.x + cell.w / 2 + 20);
   });
 
   test('a short touch tap selects the slot, and a second tap elsewhere lets it go', async ({ page }) => {

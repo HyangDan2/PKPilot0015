@@ -253,7 +253,7 @@ test.describe('the plate viewport', () => {
     expect(Math.abs(after.pan.y - before.pan.y)).toBeGreaterThan(2);
   });
 
-  test('two fingers in a hurry zoom the view even over the selected slot', async ({ page }) => {
+  test('two fingers over the selected slot turn the slot, never the view', async ({ page }) => {
     await openStudio(page);
     const spec = await saveSpec(page);
     const start = await view(page);
@@ -273,10 +273,11 @@ test.describe('the plate viewport', () => {
     ]);
 
     const after = await view(page);
-    expect(after.scale, 'the view zoomed in').toBeGreaterThan(own.scale * 1.4);
-    /* and the frame underneath was not resized by the reaching hand */
-    const untouched = await saveSpec(page);
-    expect(untouched.cells[0]).toEqual(cell);
+    expect(after.zoom, 'the glass stayed at its fit').toBe(own.zoom);
+    expect(after.scale, 'the view did not zoom').toBeCloseTo(own.scale, 3);
+    /* the two fingers took the slot they landed on and grew it */
+    const grown = await saveSpec(page);
+    expect(grown.cells[0].w).toBeGreaterThan(cell.w * 1.5);
   });
 
   test('a zoomed, moved plate still selects and moves the same slot', async ({ page }) => {

@@ -44,15 +44,12 @@ interface DragState {
   startAngle?: number;
   pinch?: { dist: number; angle: number; mid: Point; rotation: number };
   moved: boolean;
-  startedAt: number;
-  fromSelected: boolean;
 }
 
 /**
- * The moment between a finger landing and a gesture being certain: a finger
- * that lands on the selected layer is only a candidate drag, so a second
- * finger arriving quickly can still turn the whole thing into a viewport
- * pinch, and a finger that never moves is a tap that edits nothing.
+ * The moment between a finger landing and a drag being certain: a finger on the
+ * selected layer is only a candidate, so a finger that never moves is a tap
+ * that edits nothing, and one that does begins from the box it landed on.
  */
 interface Pending {
   id: number;
@@ -61,7 +58,6 @@ interface Pending {
   box: LayerBounds;
   start: Point;
   startClient: Point;
-  startedAt: number;
   corner?: Corner;
 }
 
@@ -79,21 +75,19 @@ type ViewGesture =
 
 /** A finger must travel this far (px) before it is a drag rather than a tap. */
 const PAN_THRESHOLD = 3;
-/**
- * Two fingers that land within this window are always the viewport's pinch,
- * whatever the first one touched — reaching to zoom must never resize a photo.
- * Hold a selected layer longer than this and a second finger pinches the layer.
- */
-const QUICK_PINCH_MS = 150;
 
 /**
  * The plate, and a finger's whole vocabulary on it: tap to select, drag to
  * move (with magnet guides), corner grips to grow or shrink, the top grip to
  * turn, two fingers to pinch and twist. Nothing here needs an input box.
  *
- * The viewport is separate from those layers — wheel or two fingers zoom, an
- * empty spot or Space turns the glass itself — so a frame bigger than the
- * screen can be reached without touching what is painted on it.
+ * Two fingers belong to whatever they land on, with no waiting at all: a layer
+ * under the first finger — or between the two — is selected and taken hold of
+ * and turned, grown or slid at once; the empty stage around it zooms instead.
+ *
+ * The viewport is separate from those layers — wheel or two fingers on the bare
+ * stage zoom, an empty spot or Space turns the glass itself — so a frame bigger
+ * than the screen can be reached without touching what is painted on it.
  */
 export function StageCanvas(props: StageCanvasProps) {
   const { t } = useI18n();
@@ -453,15 +447,42 @@ export function StageCanvas(props: StageCanvasProps) {
     };
   }, []);
 
-  const begin = (mode: DragMode, target: Exclude<Selection, null>, box: LayerBounds, pt: Point, corner?: Corner, startedAt = Date.now()) => {
+  const begin = (mode: DragMode, target: Exclude<Selection, null>, box: LayerBounds, pt: Point, corner?: Corner) => {
     drag.current = {
       /* `base` is an independent deep copy: every frame of the gesture is
          measured from here, never from the value the last frame left behind. */
       mode, target, base: sf().clone(spec), next: sf().clone(spec), box, start: pt, corner, moved: false,
       startAngle: Math.atan2(pt.y - box.cy, pt.x - box.cx) * 180 / Math.PI,
-      startedAt,
-      fromSelected: true,
     };
+  };
+
+  /**
+   * Two fingers on a layer: one gesture that grows it by their distance, turns
+   * it by their angle and slides it by their middle, all from `from` — the
+   * document as it stood the instant they landed.
+   */
+  const startLayerPinch = (target: Exclude<Selection, null>, box: LayerBounds, pt: Point, from: ShutterFrameSpec) => {
+    drag.current = {
+      mode: 'pinch', target, base: sf().clone(from), next: sf().clone(from), box, start: pt,
+      pinch: pinchOf(box), moved: false,
+    };
+  };
+
+  /**
+   * The layer a two-finger gesture takes hold of: the one the first finger
+   * had already caught (selected or a bare hit), and failing that the one the
+   * two fingers straddle. `null` means the empty stage owns the pinch.
+   */
+  const layerBetween = (second: Point): Exclude<Selection, null> | null => {
+    const first = Array.from(held.current.values())[0];
+    const gesture = viewGesture.current;
+    const caught = drag.current?.target ?? pending.current?.target
+      ?? (gesture && gesture.kind === 'pan' ? gesture.tapSelect : undefined);
+    if (caught && caught.kind !== 'overlay') return caught;
+    if (!first) return null;
+    const direct = hitTest(spec, first.design);
+    if (direct) return direct;
+    return hitTest(spec, { x: (first.design.x + second.x) / 2, y: (first.design.y + second.y) / 2 });
   };
 
   const startPan = (
@@ -499,31 +520,27 @@ export function StageCanvas(props: StageCanvasProps) {
     }
 
     if (held.current.size === 2) {
-      /* The first finger's intent, if it had time to have one: a layer it had
-         held for longer than QUICK_PINCH_MS, and only when that layer was
-         already the selection. Everything else — a fast second finger, a bare
-         spot, an unselected layer — is the viewport's pinch. */
+      /* Where the fingers landed decides who owns them. On a layer — under the
+         first finger, or between the two — that layer is selected and taken
+         hold of at once, chosen or not; on the bare stage the viewport zooms. */
       const dragging = drag.current;
-      const waiting = pending.current;
-      const anchor = dragging
-        ? { target: dragging.target, startedAt: dragging.startedAt, fromSelected: dragging.fromSelected, box: dragging.box }
-        : waiting
-          ? { target: waiting.target, startedAt: waiting.startedAt, fromSelected: true, box: waiting.box }
-          : null;
-      const settled = anchor ? Date.now() - anchor.startedAt >= QUICK_PINCH_MS : false;
-      if (anchor && settled && anchor.target.kind !== 'overlay' && anchor.box) {
-        /* the layer's own pinch: grow it and turn it, as before */
+      const currentSpec = dragging && dragging.moved ? dragging.next : spec;
+      const caught = spaceHeld.current || event.button === 1 ? null : layerBetween(pt);
+      const caughtBox = caught ? boundsOf(currentSpec, caught) : null;
+      if (caught && caughtBox) {
+        /* half a drag already given to the layer stays given: the pinch picks
+           the document up where the finger left it, it does not snap back */
+        if (dragging && dragging.moved) props.onSpecChange(sf().touch(dragging.next, {}));
         pending.current = null;
         viewGesture.current = null;
-        drag.current = {
-          mode: 'pinch', target: anchor.target, base: sf().clone(spec), next: sf().clone(spec), box: anchor.box, start: pt,
-          pinch: pinchOf(anchor.box), moved: false, startedAt: anchor.startedAt, fromSelected: true,
-        };
+        setGuides({ v: [], h: [] });
+        props.onSelect(caught);
+        startLayerPinch(caught, caughtBox, pt, currentSpec);
         event.preventDefault();
         return;
       }
-      /* a quick second finger cancels whatever the first one had started: a
-         dragged layer goes back to where it was, and the view zooms instead */
+      /* the empty stage: a drag the first finger had begun goes back to where
+         it was, and the view zooms instead */
       if (dragging && dragging.moved) {
         props.onSpecChange(sf().touch(dragging.base, {}));
       }
@@ -555,23 +572,22 @@ export function StageCanvas(props: StageCanvasProps) {
       return;
     }
 
-    const now = Date.now();
     const current = selection;
     if (current && current.kind !== 'overlay') {
       const box = boundsOf(spec, current);
       if (box) {
         const handle: Handle | null = hitHandle(pt, box, scaleNow);
         if (handle === 'rotate') {
-          pending.current = { id: event.pointerId, target: current, mode: 'rotate', box, start: pt, startClient: { x: event.clientX, y: event.clientY }, startedAt: now };
+          pending.current = { id: event.pointerId, target: current, mode: 'rotate', box, start: pt, startClient: { x: event.clientX, y: event.clientY } };
           return;
         }
         if (handle) {
-          pending.current = { id: event.pointerId, target: current, mode: 'resize', box, start: pt, startClient: { x: event.clientX, y: event.clientY }, startedAt: now, corner: handle };
+          pending.current = { id: event.pointerId, target: current, mode: 'resize', box, start: pt, startClient: { x: event.clientX, y: event.clientY }, corner: handle };
           return;
         }
         const ref = layerRef(current);
         if (ref && sf().hitLayer(spec, { ...ref, vars } as LayerRef & { vars: Record<string, string> }, pt, measure)) {
-          pending.current = { id: event.pointerId, target: current, mode: 'move', box, start: pt, startClient: { x: event.clientX, y: event.clientY }, startedAt: now };
+          pending.current = { id: event.pointerId, target: current, mode: 'move', box, start: pt, startClient: { x: event.clientX, y: event.clientY } };
           return;
         }
       }
@@ -654,7 +670,7 @@ export function StageCanvas(props: StageCanvasProps) {
       const travel = Math.hypot(event.clientX - waiting.startClient.x, event.clientY - waiting.startClient.y);
       if (travel <= PAN_THRESHOLD) return;
       pending.current = null;
-      begin(waiting.mode, waiting.target, waiting.box, waiting.start, waiting.corner, waiting.startedAt);
+      begin(waiting.mode, waiting.target, waiting.box, waiting.start, waiting.corner);
     }
 
     const state = drag.current;
@@ -682,7 +698,11 @@ export function StageCanvas(props: StageCanvasProps) {
       const next = state.next;
       pinchLayer(state.target, state.base, next, ratio, rect2);
       const delta = (angle - state.pinch.angle) * 180 / Math.PI;
-      setRotation(state.target, next, state.pinch.rotation + delta);
+      /* only a quarter turn is sticky, and only within a few degrees, so a
+         deliberate tilt still reads as one and a square stays square */
+      const turned = snapAngle(state.pinch.rotation + delta, 90, 3);
+      setRotation(state.target, next, turned.value);
+      if (Math.abs(delta) >= 2) setAngleBadge(`${Math.round(turned.value)}°`);
       state.moved = true;
       props.onSpecChange({ ...next });
       return;
