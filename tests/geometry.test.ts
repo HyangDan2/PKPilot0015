@@ -76,6 +76,21 @@ describe('rotation snapping', () => {
     expect(snapAngle(30, 45, 4)).toEqual({ value: 30, snapped: false });
     expect(snapAngle(92, 45, 4).value).toBe(90);
   });
+
+  /* the two-finger twist is looser than the grip: only a quarter turn holds,
+     and only for the last three degrees, so a slight tilt stays a tilt */
+  it('takes a twist into the quarter turn it is nearly on', () => {
+    expect(snapAngle(88, 90, 3)).toEqual({ value: 90, snapped: true });
+    expect(snapAngle(-1.5, 90, 3).value).toBe(0);
+    expect(snapAngle(177, 90, 3).value).toBe(-180);
+  });
+
+  it('leaves a deliberate tilt where the fingers put it', () => {
+    expect(snapAngle(24, 90, 3)).toEqual({ value: 24, snapped: false });
+    expect(snapAngle(86, 90, 3).snapped).toBe(false);
+    expect(snapAngle(58, 90, 3).snapped).toBe(false);
+    expect(snapAngle(-132, 90, 3).snapped).toBe(false);
+  });
 });
 
 describe('magnet guides', () => {
