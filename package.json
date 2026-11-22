@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "HD2Lab FrameBuilder — visual custom 4-cut frame studio for Shutterplate & Nordlys, 100% in-browser",
+  "description": "HD2Lab FrameBuilder — visual custom 4-cut frame studio for Shutterplate & CinePlate, 100% in-browser",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

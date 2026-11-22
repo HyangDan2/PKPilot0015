@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { sf, type FrameAlign, type FrameEmblem, type FrameFamily, type ShutterFrameSpec } from '../spec/shutterframe';
+import { sf, type FrameAlign, type FrameEmblem, type FrameFamily, type FrameTexture, type ShutterFrameSpec } from '../spec/shutterframe';
 import { Icon } from './Icons';
 import { Drawer } from './Drawer';
 import { useI18n } from '../i18n';
@@ -16,6 +16,11 @@ export interface RightDrawerProps {
   onSlotFile: (index: number, file: File) => void;
   onBackground: () => void;
   onRemoveBackground: () => void;
+  /** Whether a cut already holds a photograph. */
+  slotFilled: (index: number) => boolean;
+  onSlotClear: (index: number) => void;
+  /** The cut's own photo · size · angle sheet. */
+  onSlotSheet: (index: number) => void;
 }
 
 const CANVAS_PRESETS = [
@@ -170,6 +175,18 @@ function PropertiesBody(props: RightDrawerProps) {
   const slotIndex = useRef(0);
   const patch = (next: Partial<ShutterFrameSpec>) => props.onChange(sf().touch(spec, next));
 
+  const setTexture = (change: Partial<FrameTexture>) => {
+    const next = sf().clone(spec);
+    next.canvas.texture = {
+      kind: next.canvas.texture?.kind ?? 'cotton',
+      strength: next.canvas.texture?.strength ?? 0.55,
+      ...change,
+    };
+    props.onChange(sf().touch(next, {}));
+  };
+
+  const texture = spec.canvas.texture ?? { kind: 'cotton' as const, strength: 0.55 };
+
   const setCanvasSize = (w: number, h: number) => {
     const nx = Math.max(240, Math.round(w));
     const ny = Math.max(240, Math.round(h));
@@ -240,9 +257,19 @@ function PropertiesBody(props: RightDrawerProps) {
                 props.onChange(sf().alignCells(spec, '2x2', margin, gutter));
               }}>{t('props.align22')}</button>
             </div>
-            <button type="button" className="btn ghost small" onClick={() => { slotIndex.current = index; slotInput.current?.click(); }}>
-              <Icon name="image" size={13} /> {t('props.putPhoto')}
-            </button>
+            <div className="row-btns">
+              <button type="button" className="btn ghost small" data-testid="props-slot-photo" onClick={() => { slotIndex.current = index; slotInput.current?.click(); }}>
+                <Icon name="image" size={13} /> {t('props.putPhoto')}
+              </button>
+              <button type="button" className="btn ghost small" data-testid="props-slot-sheet" onClick={() => props.onSlotSheet(index)}>
+                <Icon name="sliders" size={13} /> {t('action.details')}
+              </button>
+            </div>
+            {props.slotFilled(index) && (
+              <button type="button" className="btn ghost small danger" data-testid="props-slot-clear" onClick={() => props.onSlotClear(index)}>
+                <Icon name="trash" size={13} /> {t('props.clearPhoto')}
+              </button>
+            )}
           </section>
         );
       })()}
@@ -478,6 +505,47 @@ function PropertiesBody(props: RightDrawerProps) {
             </>
           ) : <span className="muted">{t('props.off')}</span>}
         </div>
+      </Field>
+      <Field label={t('props.texture')} hint={t('props.textureHint')}>
+        <div className="preset-grid three">
+          <button
+            type="button"
+            className={`chip${texture.kind === 'cotton' ? ' on' : ''}`}
+            data-testid="texture-cotton"
+            aria-pressed={texture.kind === 'cotton'}
+            onClick={() => setTexture({ kind: 'cotton' })}
+          >{t('props.textureCotton')}</button>
+          <button
+            type="button"
+            className={`chip${texture.kind === 'archive' ? ' on' : ''}`}
+            data-testid="texture-archive"
+            aria-pressed={texture.kind === 'archive'}
+            onClick={() => setTexture({ kind: 'archive' })}
+          >{t('props.textureArchive')}</button>
+          <button
+            type="button"
+            className={`chip${texture.kind === 'none' ? ' on' : ''}`}
+            data-testid="texture-none"
+            aria-pressed={texture.kind === 'none'}
+            onClick={() => setTexture({ kind: 'none' })}
+          >{t('props.textureNone')}</button>
+        </div>
+        {texture.kind !== 'none' && (
+          <div className="slot-row">
+            <input
+              className="slot-range"
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={Math.round(texture.strength * 100)}
+              data-testid="texture-strength"
+              aria-label={t('props.textureStrength')}
+              onChange={(event) => setTexture({ strength: Number(event.target.value) / 100 })}
+            />
+            <span className="slot-readout">{Math.round(texture.strength * 100)}%</span>
+          </div>
+        )}
       </Field>
       <Field label={t('props.backgroundImage')} hint={spec.canvas.backgroundImage ? t('props.backgroundOn') : t('props.backgroundOff')}>
         {spec.canvas.backgroundImage ? (

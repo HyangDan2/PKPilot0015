@@ -12,6 +12,9 @@ export interface ContextToolbarProps {
   onDetails: () => void;
   onCells: (kind: '1x4' | '2x2') => void;
   onReplacePhoto: () => void;
+  /** The selected cut already holds a photograph. */
+  photoFilled?: boolean;
+  onClearPhoto?: () => void;
 }
 
 const ALIGN: { mode: AlignMode; icon: string; key: 'align.hCenter' | 'align.vCenter' | 'align.left' | 'align.right' | 'align.top' | 'align.bottom' }[] = [
@@ -58,9 +61,14 @@ export function ContextToolbar(props: ContextToolbarProps) {
             <span className="context-sep" />
             <button type="button" className="tool wide" onClick={() => props.onCells('1x4')}>{t('props.align14')}</button>
             <button type="button" className="tool wide" onClick={() => props.onCells('2x2')}>{t('props.align22')}</button>
-            <button type="button" className="tool" onClick={props.onReplacePhoto} title={t('props.putPhoto')} aria-label={t('props.putPhoto')}>
+            <button type="button" className="tool" data-testid="context-replace-photo" onClick={props.onReplacePhoto} title={t('props.putPhoto')} aria-label={t('props.putPhoto')}>
               <Icon name="image" size={16} />
             </button>
+            {props.photoFilled && props.onClearPhoto && (
+              <button type="button" className="tool danger" data-testid="context-clear-photo" onClick={props.onClearPhoto} title={t('context.clearPhoto')} aria-label={t('context.clearPhoto')}>
+                <Icon name="imageOff" size={16} />
+              </button>
+            )}
           </>
         )}
         {removable && (

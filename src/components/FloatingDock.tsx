@@ -20,7 +20,7 @@ export interface FloatingDockProps {
   onGrid: (value: boolean) => void;
   onSave: () => void;
   onCopyLink: () => void;
-  onOpenIn: (app: 'shutterplate' | 'nordlys') => void;
+  onOpenIn: (app: 'shutterplate' | 'cineplate') => void;
   onAddSticker: () => void;
   onAddSprite: () => void;
   onAddBackground: () => void;
@@ -199,27 +199,39 @@ export function FloatingDock(props: FloatingDockProps) {
             <Icon name="link" size={16} />
             <span className="fab-label">{t('dock.copyLink')}</span>
           </button>
+          {/* The two doors print the same frame but do different work, so each
+              carries its own mark and its own line of small type. */}
           <button
             type="button"
-            className="fab"
+            className="fab app-fab app-fab-print"
             data-testid="dock-shutterplate"
+            data-app="shutterplate"
             title={t('dock.shutterplateHint')}
-            aria-label={t('dock.shutterplateHint')}
+            aria-label={`${t('dock.shutterplate')} — ${t('dock.shutterplateSub')}`}
             onClick={() => { setSaveOpen(false); props.onOpenIn('shutterplate'); }}
           >
-            <Icon name="external" size={15} />
-            <span className="fab-label">{t('dock.shutterplate')}</span>
+            <span className="app-icon" aria-hidden="true"><Icon name="cuts4" size={15} /></span>
+            <span className="fab-label app-label">
+              <b>{t('dock.shutterplate')}</b>
+              <small>{t('dock.shutterplateSub')}</small>
+            </span>
+            <Icon name="external" size={12} />
           </button>
           <button
             type="button"
-            className="fab"
-            data-testid="dock-nordlys"
-            title={t('dock.nordlysHint')}
-            aria-label={t('dock.nordlysHint')}
-            onClick={() => { setSaveOpen(false); props.onOpenIn('nordlys'); }}
+            className="fab app-fab app-fab-cine"
+            data-testid="dock-cineplate"
+            data-app="cineplate"
+            title={t('dock.cineplateHint')}
+            aria-label={`${t('dock.cineplate')} — ${t('dock.cineplateSub')}`}
+            onClick={() => { setSaveOpen(false); props.onOpenIn('cineplate'); }}
           >
-            <Icon name="external" size={15} />
-            <span className="fab-label">{t('dock.nordlys')}</span>
+            <span className="app-icon" aria-hidden="true"><Icon name="film" size={15} /></span>
+            <span className="fab-label app-label">
+              <b>{t('dock.cineplate')}</b>
+              <small>{t('dock.cineplateSub')}</small>
+            </span>
+            <Icon name="external" size={12} />
           </button>
         </div>
         <button

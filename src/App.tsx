@@ -9,6 +9,8 @@ import { HelpModal } from './components/HelpModal';
 import { ContextToolbar } from './components/ContextToolbar';
 import { StickerDrawer, PALETTES } from './components/StickerDrawer';
 import { BackgroundCropModal } from './components/BackgroundCropModal';
+import { SlotModal } from './components/SlotModal';
+import { arrowIntent, scaleSelection, turnSelection, typingInField } from './editor/nudge';
 import { PRESETS, DEMO_FIELDS, blankSpec } from './editor/presets';
 import { loadDemoSlots, slotFromFile } from './editor/photos';
 import { prepareSprite } from './editor/images';
@@ -58,6 +60,8 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [cropOpen, setCropOpen] = useState(false);
+  /** The cut whose photo sheet is open, by index. */
+  const [slotSheet, setSlotSheet] = useState<number | null>(null);
   const [palette, setPalette] = useState(PALETTES[0].id);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -68,6 +72,10 @@ export default function App() {
   const slotIndex = useRef(0);
   const saveTimer = useRef<number>(0);
   const toastTimer = useRef<number>(0);
+  /* The newest document, readable from a key that repeats faster than React
+     re-renders: the second arrow of a held key turns from the first one's
+     result, never from a stale frame. */
+  const specNow = useRef<ShutterFrameSpec | null>(null);
   const fields = useMemo<FrameFields>(() => ({ ...DEMO_FIELDS }), []);
 
   const setLang = useCallback((next: Lang) => {
@@ -204,11 +212,14 @@ export default function App() {
   }, [refreshLibrary, say, lang]);
 
   const commit = useCallback((next: ShutterFrameSpec) => {
+    specNow.current = next;
     setSpec(next);
     setDirty(true);
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => { void persist(next); }, 550);
   }, [persist]);
+
+  useEffect(() => { specNow.current = spec; }, [spec]);
 
   useEffect(() => {
     if (!spec || !ready) return;
@@ -365,7 +376,7 @@ export default function App() {
     say(t('toast.imported', { name: result.spec.name }));
   };
 
-  const shareLink = (app: 'framebuilder' | 'shutterplate' | 'nordlys') => {
+  const shareLink = (app: 'framebuilder' | 'shutterplate' | 'cineplate') => {
     if (!spec) return '';
     const base = app === 'framebuilder'
       ? `${window.location.origin}${import.meta.env.BASE_URL}`
@@ -388,7 +399,7 @@ export default function App() {
     }
   };
 
-  const openIn = (app: 'shutterplate' | 'nordlys') => {
+  const openIn = (app: 'shutterplate' | 'cineplate') => {
     const link = shareLink(app);
     if (link.length > 12000) {
       say(t('toast.linkTooLong'), 'warn');
@@ -595,6 +606,59 @@ export default function App() {
     slotInput.current?.click();
   };
 
+  /** A cut's own photograph, as a URL the sheet can show. */
+  const slotPhotoUrl = (index: number): string | undefined => {
+    const img = slots[index]?.img as (HTMLImageElement | undefined);
+    return img && 'src' in img ? img.src : undefined;
+  };
+
+  /** Empties one cut: the default photographs go as surely as an upload does. */
+  const clearSlotPhoto = (index: number) => {
+    setSlots((previous) => previous.map((slot, at) => (at === index ? { img: null, w: 0, h: 0 } : slot)));
+    setSlotNames((previous) => previous.map((name, at) => (at === index ? t('layers.slotEmpty') : name)));
+    say(t('toast.photoCleared', { n: index + 1 }));
+  };
+
+  const changeCell = (index: number, patch: Partial<ShutterFrameSpec['cells'][number]>) => {
+    const current = specNow.current;
+    if (!current) return;
+    const next = sf().clone(current);
+    if (!next.cells[index]) return;
+    next.cells[index] = { ...next.cells[index], ...patch };
+    commit(sf().touch(next, {}));
+  };
+
+  const openSlotSheet = (index: number) => {
+    if (!spec || !spec.cells[index]) return;
+    setSlotSheet(index);
+    setSelection({ kind: 'cell', index });
+  };
+
+  /*
+   * Left and right turn the selection, up and down size it. A field keeps its
+   * own arrows (a caret in an input must never rotate a photograph), and the
+   * plate's camera keeps Space and its drags.
+   */
+  useEffect(() => {
+    const onArrow = (event: KeyboardEvent) => {
+      if (!selection || selection.kind === 'overlay') return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (typingInField(event.target)) return;
+      const intent = arrowIntent(event.key, event.shiftKey);
+      if (!intent) return;
+      const current = specNow.current;
+      if (!current) return;
+      const next = intent.kind === 'turn'
+        ? turnSelection(current, selection, intent.delta)
+        : scaleSelection(current, selection, intent.factor);
+      if (next === current) return;
+      event.preventDefault();
+      commit(next);
+    };
+    window.addEventListener('keydown', onArrow);
+    return () => window.removeEventListener('keydown', onArrow);
+  }, [selection, commit]);
+
   /* ── keyboard: Esc closes every layer, ⌘/Ctrl+S downloads the frame ─────── */
   const saveRef = useRef(saveFile);
   useEffect(() => { saveRef.current = saveFile; }, [saveFile]);
@@ -604,6 +668,7 @@ export default function App() {
       if (event.key === 'Escape') {
         setHelpOpen(false);
         setCropOpen(false);
+        setSlotSheet(null);
         closeDrawers();
         return;
       }
@@ -655,7 +720,7 @@ export default function App() {
             onScale={setScale}
             onSelect={selectFromCanvas}
             onSpecChange={commit}
-            onSlotFile={addSlotFile}
+            onSlotOpen={openSlotSheet}
             overlay={selected ? (
               <ContextToolbar
                 selection={selected}
@@ -670,6 +735,8 @@ export default function App() {
                   commit(sf().alignCells(spec, kind, margin, gutter));
                 }}
                 onReplacePhoto={replaceSlotPhoto}
+                photoFilled={selected.kind === 'cell' ? !!slots[selected.index]?.img : false}
+                onClearPhoto={() => { if (selected.kind === 'cell') clearSlotPhoto(selected.index); }}
               />
             ) : null}
           />
@@ -728,6 +795,9 @@ export default function App() {
             onClose={() => setRightOpen(false)}
             onChange={commit}
             onOverlayFile={addOverlay}
+            slotFilled={(index) => !!slots[index]?.img}
+            onSlotClear={clearSlotPhoto}
+            onSlotSheet={openSlotSheet}
             onRemoveOverlay={() => {
               const next = sf().clone(spec);
               delete next.overlay;
@@ -782,6 +852,22 @@ export default function App() {
           onRemove={removeBackground}
         />
 
+        <SlotModal
+          open={slotSheet !== null}
+          index={slotSheet ?? 0}
+          cell={slotSheet !== null ? spec.cells[slotSheet] ?? null : null}
+          photoUrl={slotSheet !== null ? slotPhotoUrl(slotSheet) : undefined}
+          photoName={slotSheet !== null ? slotNames[slotSheet] : undefined}
+          onClose={() => setSlotSheet(null)}
+          onChoosePhoto={() => {
+            if (slotSheet === null) return;
+            slotIndex.current = slotSheet;
+            slotInput.current?.click();
+          }}
+          onClearPhoto={() => { if (slotSheet !== null) clearSlotPhoto(slotSheet); }}
+          onChangeCell={(patch) => { if (slotSheet !== null) changeCell(slotSheet, patch); }}
+        />
+
         <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} onOpenIn={openIn} />
 
         {toast && <div className={`toast ${toast.tone}`} role="status">{toast.text}</div>}
@@ -814,6 +900,7 @@ export default function App() {
           type="file"
           accept="image/*"
           hidden
+          data-testid="slot-input"
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) void addSlotFile(slotIndex.current, file);

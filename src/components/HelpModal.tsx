@@ -5,7 +5,7 @@ import { Icon } from './Icons';
 export interface HelpModalProps {
   open: boolean;
   onClose: () => void;
-  onOpenIn: (app: 'shutterplate' | 'nordlys') => void;
+  onOpenIn: (app: 'shutterplate' | 'cineplate') => void;
 }
 
 /** What the ⋮ menu's 도움말 opens: canvas basics, shortcuts, saving, and the two doors. */
@@ -56,6 +56,8 @@ export function HelpModal({ open, onClose, onOpenIn }: HelpModalProps) {
             <dl className="help-keys">
               <div><dt><kbd>Esc</kbd></dt><dd>{t('help.keyEsc')}</dd></div>
               <div><dt><kbd>⌘</kbd> / <kbd>Ctrl</kbd> + <kbd>S</kbd></dt><dd>{t('help.keySave')}</dd></div>
+              <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>{t('help.keyTurn')}</dd></div>
+              <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>{t('help.keySize')}</dd></div>
             </dl>
           </section>
 
@@ -72,11 +74,11 @@ export function HelpModal({ open, onClose, onOpenIn }: HelpModalProps) {
           <section className="help-section">
             <h3 className="rail-title">{t('help.linksTitle')}</h3>
             <div className="row-btns">
-              <button type="button" className="btn ghost small" onClick={() => { onClose(); onOpenIn('shutterplate'); }}>
-                <Icon name="external" size={13} /> {t('dock.shutterplate')}
+              <button type="button" className="btn ghost small" data-testid="help-shutterplate" onClick={() => { onClose(); onOpenIn('shutterplate'); }}>
+                <Icon name="cuts4" size={13} /> {t('dock.shutterplate')} · {t('dock.shutterplateSub')}
               </button>
-              <button type="button" className="btn ghost small" onClick={() => { onClose(); onOpenIn('nordlys'); }}>
-                <Icon name="external" size={13} /> {t('dock.nordlys')}
+              <button type="button" className="btn ghost small" data-testid="help-cineplate" onClick={() => { onClose(); onOpenIn('cineplate'); }}>
+                <Icon name="film" size={13} /> {t('dock.cineplate')} · {t('dock.cineplateSub')}
               </button>
             </div>
           </section>

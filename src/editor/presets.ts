@@ -50,7 +50,15 @@ function assemble(name: string, partial: Partial<ShutterFrameSpec>): ShutterFram
     name,
     author: 'HD2Lab',
     updatedAt: new Date().toISOString(),
-    canvas: { width: 600, height: 1800, background: '#f4f1ea', light: true },
+    /* every plate starts on a sheet of paper, never on flat colour: matte
+       cotton with the grain just high enough to read as print stock */
+    canvas: {
+      width: 600,
+      height: 1800,
+      background: '#f4f1ea',
+      texture: { kind: 'cotton', strength: 0.55 },
+      light: true,
+    },
     perforation: { enabled: false, style: 'side', color: '#e9e4d8' },
     cells: [
       { x: 36, y: 96, w: 528, h: 380, radius: 4 },
@@ -75,7 +83,7 @@ export const PRESETS: PresetDef[] = [
     blurb: '종이 여백 위에 네 컷을 세로로. 가장 조용한 인생네컷.',
     blurbEn: 'Four cuts stacked on quiet paper — the calmest photo booth strip.',
     build: () => assemble('Classic Strip', {
-      canvas: { width: 600, height: 1800, background: '#f4f1ea', light: true },
+      canvas: { width: 600, height: 1800, background: '#f4f1ea', light: true, texture: { kind: 'cotton', strength: 0.55 } },
       cells: cells([
         { x: 36, y: 96, w: 528, h: 380, radius: 4 },
         { x: 36, y: 496, w: 528, h: 380, radius: 4 },
@@ -104,6 +112,7 @@ export const PRESETS: PresetDef[] = [
         background: '#e8eef5',
         light: true,
         gradient: { type: 'linear', angle: 165, stops: ['#f2f6fb', '#d7e3f0'] },
+        texture: { kind: 'cotton', strength: 0.4 },
       },
       cells: cells([
         { x: 64, y: 150, w: 526, h: 646, radius: 10 },
@@ -125,7 +134,7 @@ export const PRESETS: PresetDef[] = [
     blurb: '필름 퍼포레이션이 뚫린 검은 스트립. 영화 인화 느낌.',
     blurbEn: 'A black strip pierced with film sprockets, printed like a movie still.',
     build: () => assemble('Dark Cinema', {
-      canvas: { width: 680, height: 1960, background: '#121110', light: false },
+      canvas: { width: 680, height: 1960, background: '#121110', light: false, texture: { kind: 'archive', strength: 0.4 } },
       perforation: { enabled: true, style: 'side', color: '#efe9dc', holeWidth: 16, holeHeight: 12, gap: 26 },
       cells: cells([
         { x: 92, y: 150, w: 496, h: 352, radius: 2 },
@@ -149,7 +158,7 @@ export const PRESETS: PresetDef[] = [
     blurb: '네 컷의 크기를 다르게 나눈 편집 디자인.',
     blurbEn: 'An editorial layout where each of the four cuts has its own size.',
     build: () => assemble('Magazine Collage', {
-      canvas: { width: 1200, height: 1600, background: '#fbf9f5', light: true },
+      canvas: { width: 1200, height: 1600, background: '#fbf9f5', light: true, texture: { kind: 'archive', strength: 0.5 } },
       cells: cells([
         { x: 60, y: 190, w: 700, h: 760, radius: 0 },
         { x: 788, y: 190, w: 352, h: 760, radius: 0 },
@@ -173,7 +182,7 @@ export const PRESETS: PresetDef[] = [
     blurb: '투명 PNG 테두리를 사진 위에 얹는 인생네컷 템플릿.',
     blurbEn: 'A transparent PNG frame laid over the photos, like a booth print.',
     build: () => assemble('Photo Booth Overlay', {
-      canvas: { width: 600, height: 1800, background: '#ffffff', light: true },
+      canvas: { width: 600, height: 1800, background: '#ffffff', light: true, texture: { kind: 'cotton', strength: 0.35 } },
       cells: cells([
         { x: 66, y: 118, w: 468, h: 372, radius: 10 },
         { x: 66, y: 508, w: 468, h: 372, radius: 10 },

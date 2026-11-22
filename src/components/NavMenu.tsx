@@ -7,7 +7,7 @@ export const HD2_LINKS: { id: string; label: TKey; note: TKey; href: string }[] 
   { id: 'web-hq', label: 'menu.webHq', note: 'menu.webHqNote', href: 'https://hyangdan2.github.io/' },
   { id: 'apphub', label: 'menu.apphub', note: 'menu.apphubNote', href: 'https://hyangdan2.github.io/ApplicationHub/' },
   { id: 'shutterplate', label: 'menu.shutterplate', note: 'menu.shutterplateNote', href: 'https://hyangdan2.github.io/PKPilot0003/' },
-  { id: 'nordlys', label: 'menu.nordlys', note: 'menu.nordlysNote', href: 'https://hyangdan2.github.io/PKPilot0011/' },
+  { id: 'cineplate', label: 'menu.cineplate', note: 'menu.cineplateNote', href: 'https://hyangdan2.github.io/PKPilot0011/' },
   { id: 'framebuilder', label: 'menu.framebuilder', note: 'menu.framebuilderNote', href: 'https://hyangdan2.github.io/PKPilot0015/' },
 ];
 
