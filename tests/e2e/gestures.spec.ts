@@ -261,9 +261,10 @@ test.describe('dragging on the plate', () => {
     expect(after.cells[0].w).toBeLessThan(2000);
   });
 
-  test('two fingers on an unselected slot take it at once and grow and turn it', async ({ page }) => {
+  test('two fingers on a slot nobody selected zoom the plate and leave the slot alone', async ({ page }) => {
     await openStudio(page);
     const plate = await plateMap(page);
+    const scaleBefore = await plateScale(page);
     const cell = plate.spec.cells[0];
     const mid = plate.at(cell.x + cell.w / 2, cell.y + cell.h / 2);
     const a = { x: mid.x - 44, y: mid.y };
@@ -271,25 +272,42 @@ test.describe('dragging on the plate', () => {
     const a2 = twist(a, mid, 20, 1.7);
     const b2 = twist(b, mid, 20, 1.7);
 
-    /* no hold, no tap first: the fingers land on the plate and twist */
+    /* no tap first: the hand only means to look closer, so the fingers zoom */
     await twoFingers(page, a, b, a2, b2);
 
-    expect(await plateZoom(page), 'the glass did not zoom').toBe('fit');
+    expect(await plateScale(page), 'the plate zoomed under the fingers').toBeGreaterThan(scaleBefore * 1.4);
+    expect(Number(await plateZoom(page))).toBeGreaterThan(0.2);
     const after = await saveSpec(page);
-    const ratio = after.cells[0].w / cell.w;
-    expect(ratio, 'the slot grew with the fingers').toBeGreaterThan(1.45);
-    expect(ratio).toBeLessThan(2.1);
-    expect(Math.abs((after.cells[0].rotation ?? 0) - 20), 'the slot turned with the fingers').toBeLessThanOrEqual(6);
-    await expect(page.getByTestId('context-bar')).toHaveAttribute('aria-label', /01/);
+    expect(after.cells[0], 'the slot keeps its size, place and angle').toEqual(cell);
+    await expect(page.getByTestId('context-bar'), 'the pinch selected nothing').toHaveCount(0);
   });
 
-  test('two fingers that straddle a slot take it, even when one lands on the margin', async ({ page }) => {
+  test('two fingers on another slot zoom the plate while a slot is chosen', async ({ page }) => {
     await openStudio(page);
-    const plate = await plateMap(page);
+    const plate = await selectFirstSlot(page);
+    const scaleBefore = await plateScale(page);
+    const other = plate.spec.cells[1] ?? plate.spec.cells[0];
+    const mid = plate.at(other.x + other.w / 2, other.y + other.h / 2);
+    const a = { x: mid.x - 30, y: mid.y };
+    const b = { x: mid.x + 30, y: mid.y };
+    const a2 = { x: a.x - 34, y: a.y };
+    const b2 = { x: b.x + 34, y: b.y };
+
+    /* slot 01 is chosen: two fingers on slot 02 belong to the glass */
+    await twoFingers(page, a, b, a2, b2, 15, [85, 86]);
+
+    expect(await plateScale(page), 'the plate zoomed').toBeGreaterThan(scaleBefore * 1.4);
+    const after = await saveSpec(page);
+    expect(after.cells, 'no slot grew or turned').toEqual(plate.spec.cells);
+  });
+
+  test('two fingers that straddle the chosen slot take it, even with one on the margin', async ({ page }) => {
+    await openStudio(page);
+    const plate = await selectFirstSlot(page);
     const cell = plate.spec.cells[0];
     const midY = cell.y + cell.h / 2;
     /* the first finger on the paper beside the cut, the second inside it, so
-       the middle between them is over the cut */
+       the middle between them is over the chosen cut */
     const a = plate.at(cell.x - 20, midY);
     const b = plate.at(cell.x + 120, midY);
     const a2 = { x: a.x - 30, y: a.y };

@@ -202,11 +202,13 @@ describe('the canvas wires every gesture through the base-relative helpers', () 
     expect(source).not.toMatch(/base: spec,/);
   });
 
-  it('two fingers belong to where they land, not to how long the first one waited', () => {
+  it('two fingers belong to the chosen layer only, and to the glass everywhere else', () => {
     expect(source).not.toContain('QUICK_PINCH_MS');
-    expect(source).toContain('layerBetween');
+    expect(source).toContain('chosenUnder');
+    expect(source).toContain('pinchTarget');
     expect(source).toContain("mode: 'pinch'");
-    expect(source).toContain('props.onSelect(caught)');
+    /* a pinch never selects anything: with nothing chosen the fingers zoom */
+    expect(source).not.toContain('props.onSelect(caught)');
   });
 
   it('never adds a pointer delta to the frame it is already writing', () => {

@@ -7,6 +7,7 @@ import {
   type Box, type Corner, type Handle, type Point,
 } from '../editor/geometry';
 import { moveLayer, pinchLayer, resizeLayer } from '../editor/drag';
+import { pinchTarget } from '../editor/pinch';
 import {
   clampPan, fitInsets, originOf, pinchAround, resolveScale, toDesignPoint, zoomAround,
   type Pan, type Size, type View,
@@ -81,9 +82,11 @@ const PAN_THRESHOLD = 3;
  * move (with magnet guides), corner grips to grow or shrink, the top grip to
  * turn, two fingers to pinch and twist. Nothing here needs an input box.
  *
- * Two fingers belong to whatever they land on, with no waiting at all: a layer
- * under the first finger — or between the two — is selected and taken hold of
- * and turned, grown or slid at once; the empty stage around it zooms instead.
+ * Two fingers are the glass's own zoom unless a layer is already chosen and
+ * they land on it: only then do they turn, grow or slide that layer, with no
+ * waiting at all. With nothing chosen — or two fingers over the bare stage —
+ * the plate zooms, so a frame nobody picked is never grabbed by a hand that
+ * only meant to look closer.
  *
  * The viewport is separate from those layers — wheel or two fingers on the bare
  * stage zoom, an empty spot or Space turns the glass itself — so a frame bigger
@@ -469,20 +472,22 @@ export function StageCanvas(props: StageCanvasProps) {
   };
 
   /**
-   * The layer a two-finger gesture takes hold of: the one the first finger
-   * had already caught (selected or a bare hit), and failing that the one the
-   * two fingers straddle. `null` means the empty stage owns the pinch.
+   * The layer two fingers may take hold of: the one already chosen, and only
+   * where they land on it. With nothing chosen — or with the fingers over any
+   * other layer — `null` sends the pinch to the viewport instead.
    */
-  const layerBetween = (second: Point): Exclude<Selection, null> | null => {
-    const first = Array.from(held.current.values())[0];
-    const gesture = viewGesture.current;
-    const caught = drag.current?.target ?? pending.current?.target
-      ?? (gesture && gesture.kind === 'pan' ? gesture.tapSelect : undefined);
-    if (caught && caught.kind !== 'overlay') return caught;
-    if (!first) return null;
-    const direct = hitTest(spec, first.design);
-    if (direct) return direct;
-    return hitTest(spec, { x: (first.design.x + second.x) / 2, y: (first.design.y + second.y) / 2 });
+  const chosenUnder = (second: Point): Exclude<Selection, null> | null => {
+    const current = selection && selection.kind !== 'overlay' ? selection : null;
+    const ref = current ? layerRef(current) : null;
+    if (!current || !ref) return null;
+    const probe = { ...ref, vars } as LayerRef & { vars: Record<string, string> };
+    const fingers = Array.from(held.current.values()).map((item) => item.design);
+    return pinchTarget(
+      selection,
+      drag.current?.target ?? pending.current?.target ?? null,
+      [...fingers, second],
+      (_layer, point) => sf().hitLayer(spec, probe, point, measure),
+    );
   };
 
   const startPan = (
@@ -520,12 +525,12 @@ export function StageCanvas(props: StageCanvasProps) {
     }
 
     if (held.current.size === 2) {
-      /* Where the fingers landed decides who owns them. On a layer — under the
-         first finger, or between the two — that layer is selected and taken
-         hold of at once, chosen or not; on the bare stage the viewport zooms. */
+      /* Where the fingers landed decides who owns them — but only a layer
+         that is already chosen can be grabbed: two fingers on a frame nobody
+         selected zoom the glass instead of taking the frame. */
       const dragging = drag.current;
       const currentSpec = dragging && dragging.moved ? dragging.next : spec;
-      const caught = spaceHeld.current || event.button === 1 ? null : layerBetween(pt);
+      const caught = spaceHeld.current || event.button === 1 ? null : chosenUnder(pt);
       const caughtBox = caught ? boundsOf(currentSpec, caught) : null;
       if (caught && caughtBox) {
         /* half a drag already given to the layer stays given: the pinch picks
@@ -534,13 +539,12 @@ export function StageCanvas(props: StageCanvasProps) {
         pending.current = null;
         viewGesture.current = null;
         setGuides({ v: [], h: [] });
-        props.onSelect(caught);
         startLayerPinch(caught, caughtBox, pt, currentSpec);
         event.preventDefault();
         return;
       }
-      /* the empty stage: a drag the first finger had begun goes back to where
-         it was, and the view zooms instead */
+      /* the glass owns them: a drag the first finger had begun goes back to
+         where it was, and the view zooms instead */
       if (dragging && dragging.moved) {
         props.onSpecChange(sf().touch(dragging.base, {}));
       }
